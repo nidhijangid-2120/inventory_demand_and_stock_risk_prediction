@@ -1,0 +1,52 @@
+[
+  {
+    "event_id": "evt_1791784158779_974",
+    "event_timestamp": "2026-10-12T11:19:18.779839",
+    "store_id": "S004",
+    "product_id": "P0018",
+    "category": "General",
+    "units_sold": 9,
+    "unit_price": 76.93,
+    "source": "simulated_pos_register"
+  },
+  {
+    "event_id": "evt_1791784158980_692",
+    "event_timestamp": "2026-10-12T11:19:18.980954",
+    "store_id": "S005",
+    "product_id": "P0011",
+    "category": "General",
+    "units_sold": 1,
+    "unit_price": 28.86,
+    "source": "simulated_pos_register"
+  },
+  {
+    "event_id": "evt_1791784159183_463",
+    "event_timestamp": "2026-10-12T11:19:19.183405",
+    "store_id": "S005",
+    "product_id": "P0010",
+    "category": "General",
+    "units_sold": 3,
+    "unit_price": 51.93,
+    "source": "simulated_pos_register"
+  },
+  {
+    "event_id": "evt_1791784159384_708",
+    "event_timestamp": "2026-10-12T11:19:19.384050",
+    "store_id": "S003",
+    "product_id": "P0003",
+    "category": "Clothing",
+    "units_sold": 15,
+    "unit_price": 129.82,
+    "source": "simulated_pos_register"
+  },
+  {
+    "event_id": "evt_1791784159584_201",
+    "event_timestamp": "2026-10-12T11:19:19.584267",
+    "store_id": "S003",
+    "product_id": "P0018",
+    "category": "General",
+    "units_sold": 6,
+    "unit_price": 66.87,
+    "source": "simulated_pos_register"
+  }
+]

@@ -1,0 +1,60 @@
+{
+  "model_type": "Spark_MLlib_RandomForestRegressor",
+  "trees": 40,
+  "max_depth": 8,
+  "features": [
+    "inventory_level",
+    "price",
+    "discount",
+    "promotion",
+    "competitor_pricing",
+    "epidemic",
+    "day_of_week",
+    "day_of_month",
+    "month",
+    "is_weekend",
+    "demand_lag_1",
+    "demand_lag_7",
+    "demand_lag_14",
+    "demand_lag_28",
+    "rolling_demand_mean_7",
+    "rolling_demand_mean_14",
+    "rolling_demand_mean_28",
+    "price_to_comp_ratio",
+    "is_discounted",
+    "store_id_idx",
+    "product_id_idx",
+    "category_idx",
+    "region_idx",
+    "weather_condition_idx",
+    "seasonality_idx"
+  ],
+  "target": "target_demand_next_7d",
+  "chronological_splits": {
+    "train_period": "<= 2023-06-15",
+    "val_period": "2023-06-15 to 2023-10-15",
+    "test_period": "> 2023-10-15"
+  },
+  "validation_comparison": {
+    "Baseline_Naive_Lag1": {
+      "MAE": 236.24,
+      "RMSE": 308.36,
+      "WAPE": 30.56
+    },
+    "Baseline_Rolling_7d": {
+      "MAE": 132.4,
+      "RMSE": 171.71,
+      "WAPE": 17.13
+    },
+    "Random_Forest_ML": {
+      "MAE": 97.81,
+      "RMSE": 129.77,
+      "WAPE": 12.65
+    }
+  },
+  "test_performance": {
+    "MAE": 103.07,
+    "RMSE": 134.36,
+    "WAPE": 14.46
+  }
+}
