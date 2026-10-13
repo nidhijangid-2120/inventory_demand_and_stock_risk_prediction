@@ -1,4 +1,19 @@
 services:
+  api:
+    build: .
+    command: python -m uvicorn src.api.main:app --host 0.0.0.0 --port 8000
+    ports:
+      - "8000:8000"
+    depends_on:
+      - kafka
+
+  dashboard:
+    build: .
+    command: python -m streamlit run src/dashboard/app.py --server.address=0.0.0.0 --server.port=8501
+    ports:
+      - "8501:8501"
+    depends_on:
+      - api
   kafka:
     image: confluentinc/cp-kafka:7.5.0
     container_name: inventory-kafka

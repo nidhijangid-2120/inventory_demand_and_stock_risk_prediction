@@ -1,773 +1,479 @@
-"""
-Inventory Intelligence Dashboard  –  Streamlit front-end
-=========================================================
-Data sources (all real, pre-computed by pipeline):
-  • data/gold/latest_risk_snapshot.json  –  per-SKU risk assessment
-  • data/raw/sales_data.csv              –  daily sales history
-  • models/model_metrics.json           –  model benchmark results
+"""Inventory demand and stock-risk operations dashboard.
 
-Rendering rules (Windows Device Guard / DLL policy constraints):
-  • NO pandas, NO pyarrow imports anywhere in this file
-  • NO st.dataframe() / st.table() – use st.markdown(html) instead
-  • Charts: st.vega_lite_chart() accepts plain list-of-dicts (no pandas needed)
-  • Run with: python -m streamlit run src\\dashboard\\app.py
+Run from the project root with: python -m streamlit run src/dashboard/app.py
+The UI uses only Streamlit and the Python standard library so it also runs in
+the project's constrained Windows environment.
 """
 
-import os
+from __future__ import annotations
+
 import csv
+import datetime as dt
+import html
 import json
-import datetime
-import collections
+import os
+from collections import defaultdict
+
 import streamlit as st
 
-# ---------------------------------------------------------------------------
-# Page config (must be first Streamlit call)
-# ---------------------------------------------------------------------------
+
 st.set_page_config(
-    page_title="Inventory Intelligence Dashboard",
+    page_title="Inventory Intelligence | Control Tower",
     page_icon="📦",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-# ---------------------------------------------------------------------------
-# File path constants
-# ---------------------------------------------------------------------------
-BASE_DIR     = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-SNAPSHOT_PATH = os.path.join(BASE_DIR, "data",   "gold",   "latest_risk_snapshot.json")
-METRICS_PATH  = os.path.join(BASE_DIR, "models", "model_metrics.json")
-RAW_CSV_PATH  = os.path.join(BASE_DIR, "data",   "raw",    "sales_data.csv")
 
-# ---------------------------------------------------------------------------
-# Known dimension values (hard-coded once; derived from raw CSV)
-# ---------------------------------------------------------------------------
-ALL_STORES     = ["S001", "S002", "S003", "S004", "S005"]
-ALL_PRODUCTS   = [f"P{i:04d}" for i in range(1, 21)]
-ALL_CATEGORIES = ["Clothing", "Electronics", "Furniture", "Groceries", "Toys"]
 
-# ---------------------------------------------------------------------------
-# Badge / colour palettes
-# ---------------------------------------------------------------------------
-BADGE = {
-    "HIGH_STOCKOUT_RISK":      "background:#ff4b4b;color:#fff;",
-    "ELEVATED_STOCKOUT_RISK":  "background:#ffa421;color:#000;",
-    "LOW_STOCKOUT_RISK":       "background:#21c354;color:#fff;",
-    "CRITICAL_OVERSTOCK":      "background:#9d4edd;color:#fff;",
-    "SLOW_MOVING":             "background:#ffaa00;color:#000;",
-    "HEALTHY_VELOCITY":        "background:#21c354;color:#fff;",
-    "EXPEDITE_ORDER":          "background:#d90429;color:#fff;",
-    "MONITOR_REORDER":         "background:#f77f00;color:#000;",
-    "PROMO_DISCOUNT":          "background:#7209b7;color:#fff;",
-    "DELAY_PURCHASE":          "background:#e09f3e;color:#000;",
-    "MAINTAIN_NORMAL":         "background:#2b9348;color:#fff;",
+def build_theme_vars(mode: str) -> str:
+    palette = {
+        "Light": {
+            "bg": "#f4f7f6",
+            "surface": "#ffffff",
+            "sidebar": "#eef4f1",
+            "ink": "#152228",
+            "muted": "#5b6a70",
+            "line": "#dfe8e3",
+            "hover": "#edf4ef",
+            "table-hover": "#f6faf7",
+            "input": "#ffffff",
+            "pill-red": "#9a2a2a",
+            "pill-red-bg": "#fee1e1",
+            "pill-amber": "#8b5a1e",
+            "pill-amber-bg": "#fff0d8",
+            "pill-green": "#1d5d40",
+            "pill-green-bg": "#dff6eb",
+            "pill-purple": "#5a3d92",
+            "pill-purple-bg": "#efe8ff",
+        },
+        "Dark": {
+            "bg": "#0d1117",
+            "surface": "#171b22",
+            "sidebar": "#111821",
+            "ink": "#e6edf3",
+            "muted": "#a6b3bd",
+            "line": "#2a3641",
+            "hover": "#1b2330",
+            "table-hover": "#1d2a34",
+            "input": "#111827",
+            "pill-red": "#f9b7b5",
+            "pill-red-bg": "#3a1a1d",
+            "pill-amber": "#f6c76f",
+            "pill-amber-bg": "#483219",
+            "pill-green": "#b5e7c6",
+            "pill-green-bg": "#183524",
+            "pill-purple": "#d7c5ff",
+            "pill-purple-bg": "#2b2141",
+        },
+    }.get(mode, {
+        "bg": "#0f1720",
+        "surface": "#171f29",
+        "sidebar": "#111b24",
+        "ink": "#edf5f8",
+        "muted": "#a9b7c2",
+        "line": "#2a3642",
+        "hover": "#1a2632",
+        "table-hover": "#1d2d39",
+        "input": "#101923",
+        "pill-red": "#f9b7b5",
+        "pill-red-bg": "#3a1a1d",
+        "pill-amber": "#f6c76f",
+        "pill-amber-bg": "#483219",
+        "pill-green": "#b5e7c6",
+        "pill-green-bg": "#183524",
+        "pill-purple": "#d7c5ff",
+        "pill-purple-bg": "#2b2141",
+    })
+
+    return f"""
+    --bg:{palette['bg']};
+    --surface:{palette['surface']};
+    --sidebar:{palette['sidebar']};
+    --ink:{palette['ink']};
+    --muted:{palette['muted']};
+    --line:{palette['line']};
+    --hover:{palette['hover']};
+    --table-hover:{palette['table-hover']};
+    --input:{palette['input']};
+    --pill-red:{palette['pill-red']};
+    --pill-red-bg:{palette['pill-red-bg']};
+    --pill-amber:{palette['pill-amber']};
+    --pill-amber-bg:{palette['pill-amber-bg']};
+    --pill-green:{palette['pill-green']};
+    --pill-green-bg:{palette['pill-green-bg']};
+    --pill-purple:{palette['pill-purple']};
+    --pill-purple-bg:{palette['pill-purple-bg']};
+    """
+
+
+theme_vars = build_theme_vars("Light")
+
+BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+SNAPSHOT_PATH = os.path.join(BASE_DIR, "data", "gold", "latest_risk_snapshot.json")
+METRICS_PATH = os.path.join(BASE_DIR, "models", "model_metrics.json")
+SALES_PATH = os.path.join(BASE_DIR, "data", "raw", "sales_data.csv")
+
+st.markdown("""
+<style>
+__THEME_VARS__
+
+html, body, .stApp, [data-testid="stAppViewContainer"] {
+    background:var(--bg) !important;
+    color:var(--ink) !important;
+    font-family:'Segoe UI',sans-serif;
+}
+[data-testid="stHeader"] { background:var(--bg) !important; }
+[data-testid="stSidebar"] {
+    background:var(--sidebar) !important;
+    border-right:1px solid var(--line);
+}
+.block-container { padding-top:1.55rem; padding-bottom:2.5rem; max-width:1500px; }
+h1,h2,h3,h4,p,label,span,li { color:var(--ink); }
+[data-testid="stCaptionContainer"], [data-testid="stCaptionContainer"] p,
+.small-muted, .section-kicker { color:var(--muted) !important; }
+
+[data-testid="stMetric"] {
+    background:var(--surface) !important;
+    border:1px solid var(--line);
+    padding:16px 18px;
+    border-radius:14px;
+    box-shadow:0 2px 8px #00000012;
+}
+[data-testid="stMetricLabel"] { color:var(--muted) !important; }
+[data-testid="stMetricValue"] { color:var(--ink) !important; }
+
+input, textarea, [data-baseweb="select"] > div {
+    background:var(--input) !important;
+    color:var(--ink) !important;
+    border-color:var(--line) !important;
+}
+[data-baseweb="popover"], [data-baseweb="menu"] {
+    background:var(--surface) !important;
+    color:var(--ink) !important;
+}
+[data-baseweb="menu"] * { color:var(--ink) !important; }
+
+[data-testid="stTabs"] button { color:var(--muted) !important; font-weight:650; }
+[data-testid="stTabs"] button[aria-selected="true"] { color:var(--ink) !important; }
+[data-testid="stDataFrame"], [data-testid="stExpander"] {
+    background:var(--surface) !important;
+    border:1px solid var(--line) !important;
+    border-radius:12px;
 }
 
-# ---------------------------------------------------------------------------
-# Data loading helpers (all pure Python stdlib)
-# ---------------------------------------------------------------------------
+.hero {
+    background:linear-gradient(115deg,#123d2b,#1e694b 65%,#3c8a62);
+    border-radius:18px; padding:25px 29px; color:white; margin:3px 0 20px;
+}
+.hero h2 { color:white !important; margin:0 0 5px; font-size:1.5rem; }
+.hero p { color:#e0eee5 !important; margin:0; font-size:.94rem; }
+.eyebrow { font-size:.72rem; text-transform:uppercase; letter-spacing:.12em; opacity:.85; font-weight:700; margin-bottom:8px; }
+.panel { background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:17px 19px; }
+.pill { border-radius:30px; padding:4px 9px; font-size:.72rem; font-weight:700; white-space:nowrap; }
+.risk-high { color:var(--pill-red) !important; background:var(--pill-red-bg); }
+.risk-elevated { color:var(--pill-amber) !important; background:var(--pill-amber-bg); }
+.risk-low { color:var(--pill-green) !important; background:var(--pill-green-bg); }
+.risk-over { color:var(--pill-purple) !important; background:var(--pill-purple-bg); }
 
-@st.cache_data(show_spinner="Loading risk snapshot…")
+.inventory-table-wrap {
+    overflow:auto; max-height:540px;
+    border:1px solid var(--line); border-radius:12px;
+    background:var(--surface);
+}
+.inventory-table { width:100%; border-collapse:collapse; font-size:13px; white-space:nowrap; }
+.inventory-table th, .inventory-table td {
+    padding:10px 12px; text-align:left;
+    border-bottom:1px solid var(--line); color:var(--ink);
+}
+.inventory-table th {
+    position:sticky; top:0; background:var(--hover);
+    color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.04em;
+}
+.inventory-table tbody tr:hover { background:var(--table-hover); }
+</style>
+""".replace("__THEME_VARS__", theme_vars), unsafe_allow_html=True)
+
+
+@st.cache_data(show_spinner="Loading inventory and sales data…")
 def load_snapshot():
-    """Returns list of dicts from latest_risk_snapshot.json."""
-    if not os.path.exists(SNAPSHOT_PATH):
-        return None, f"Risk snapshot not found at `{SNAPSHOT_PATH}`.  " \
-                     f"Run: `python src/risk/generate_risk_snapshot.py`"
-    with open(SNAPSHOT_PATH, "r", encoding="utf-8") as f:
+    with open(SNAPSHOT_PATH, encoding="utf-8") as f:
         data = json.load(f)
-    return data, None
+    return data if isinstance(data, list) else []
 
 
-@st.cache_data(show_spinner="Loading model metrics…")
+@st.cache_data(show_spinner="Loading model scorecard…")
 def load_metrics():
-    """Returns metrics dict from model_metrics.json."""
-    if not os.path.exists(METRICS_PATH):
-        return None, f"Model metrics not found at `{METRICS_PATH}`.  " \
-                     f"Run: `python src/forecasting/train_forecasting.py`"
-    with open(METRICS_PATH, "r", encoding="utf-8") as f:
-        return json.load(f), None
+    with open(METRICS_PATH, encoding="utf-8") as f:
+        return json.load(f)
 
 
-@st.cache_data(show_spinner="Loading sales history (this may take ~5 s)…")
-def load_raw_history(store_id: str, product_id: str, days: int = 90):
-    """
-    Reads raw CSV (no pandas) and returns the last `days` rows for
-    the given store+product as a list of dicts with keys:
-      date (str), demand (float), inventory_level (float),
-      units_sold (float), units_ordered (float), promotion (int)
-    Sorted ascending by date.
-    """
-    if not os.path.exists(RAW_CSV_PATH):
-        return None, f"Raw CSV not found at `{RAW_CSV_PATH}`."
+@st.cache_data(show_spinner="Reading sales history…")
+def load_history(store_id: str, product_id: str):
     rows = []
-    with open(RAW_CSV_PATH, newline="", encoding="utf-8") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            if row["Store ID"] == store_id and row["Product ID"] == product_id:
+    with open(SALES_PATH, newline="", encoding="utf-8-sig") as f:
+        for r in csv.DictReader(f):
+            if r.get("Store ID") == store_id and r.get("Product ID") == product_id:
                 rows.append({
-                    "date":            row["Date"],
-                    "demand":          float(row["Demand"]),
-                    "inventory_level": float(row["Inventory Level"]),
-                    "units_sold":      float(row["Units Sold"]),
-                    "units_ordered":   float(row["Units Ordered"]),
-                    "promotion":       int(row["Promotion"]),
-                    "category":        row["Category"],
-                    "region":          row["Region"],
+                    "date": r["Date"], "demand": float(r["Demand"]),
+                    "stock": float(r["Inventory Level"]),
+                    "ordered": float(r["Units Ordered"]),
+                    "promotion": int(float(r.get("Promotion", 0) or 0)),
                 })
+    rows.sort(key=lambda x: x["date"])
+    return rows
+
+
+def number(value, digits=0):
+    try:
+        return f"{float(value):,.{digits}f}"
+    except (TypeError, ValueError):
+        return "—"
+
+
+def risk_class(value):
+    if value == "HIGH_STOCKOUT_RISK": return "risk-high"
+    if value == "ELEVATED_STOCKOUT_RISK": return "risk-elevated"
+    if value == "CRITICAL_OVERSTOCK" or value == "SLOW_MOVING": return "risk-over"
+    return "risk-low"
+
+
+def risk_label(value):
+    return value.replace("_", " ").title() if value else "—"
+
+
+def render_table(rows, limit=100):
     if not rows:
-        return None, f"No records found for {store_id} / {product_id} in the raw CSV."
-    rows.sort(key=lambda r: r["date"])
-    return rows[-days:], None
-
-
-# ---------------------------------------------------------------------------
-# HTML rendering helpers
-# ---------------------------------------------------------------------------
-
-def _badge(value: str) -> str:
-    style = BADGE.get(value, "background:#555;color:#fff;")
-    return (f'<span style="padding:2px 8px;border-radius:4px;'
-            f'font-size:11px;font-weight:600;{style}">{value}</span>')
-
-
-def _gap_cell(gap: float) -> str:
-    colour = "#ff4b4b" if gap < 0 else "#21c354"
-    sign   = "" if gap < 0 else "+"
-    return (f'<td style="padding:8px 10px;text-align:right;'
-            f'color:{colour};font-weight:bold;">{sign}{gap:.1f}</td>')
-
-
-def _th(label: str, align: str = "left") -> str:
-    return (f'<th style="padding:9px 10px;text-align:{align};'
-            f'border-bottom:2px solid #444;white-space:nowrap;">{label}</th>')
-
-
-def render_risk_table(rows: list, include_overstock_col: bool = False) -> str:
-    """Pure-HTML table for the watchlist tabs.  Zero pandas usage."""
-    if not rows:
-        return "<p style='color:#888;padding:16px;'>No items match the current filters.</p>"
-
-    ths = "".join([
-        _th("Store"),
-        _th("Product"),
-        _th("Category"),
-        _th("Region"),
-        _th("Stock", "right"),
-        _th("On Order", "right"),
-        _th("7-Day Forecast", "right"),
-        _th("Inventory Gap", "right"),
-        _th("Cover (Days)", "right"),
-        _th("Stockout Risk", "center"),
-        *([ _th("Overstock Risk", "center")] if include_overstock_col else []),
-        _th("Action", "center"),
-        _th("Manager Guidance"),
-    ])
-
-    body = ""
-    for i, r in enumerate(rows):
-        bg = "#15181e" if i % 2 == 0 else "#0e1117"
-        over_cell = (f'<td style="padding:8px 10px;text-align:center;">'
-                     f'{_badge(r["overstock_risk"])}</td>'
-                     if include_overstock_col else "")
-        body += f"""
-        <tr style="background:{bg};border-bottom:1px solid #262730;">
-          <td style="padding:8px 10px;">{r['store_id']}</td>
-          <td style="padding:8px 10px;font-weight:bold;">{r['product_id']}</td>
-          <td style="padding:8px 10px;">{r['category']}</td>
-          <td style="padding:8px 10px;">{r.get('region','—')}</td>
-          <td style="padding:8px 10px;text-align:right;">{r['current_stock']:,}</td>
-          <td style="padding:8px 10px;text-align:right;">{r['incoming_orders']:,}</td>
-          <td style="padding:8px 10px;text-align:right;font-weight:bold;">{r['forecast_demand_7d']:.1f}</td>
-          {_gap_cell(r['inventory_gap'])}
-          <td style="padding:8px 10px;text-align:right;">{r['days_of_cover']:.1f}</td>
-          <td style="padding:8px 10px;text-align:center;">{_badge(r['stockout_risk'])}</td>
-          {over_cell}
-          <td style="padding:8px 10px;text-align:center;">{_badge(r['status_action'])}</td>
-          <td style="padding:8px 10px;font-size:12px;max-width:320px;">{r['recommendation']}</td>
-        </tr>"""
-
-    return f"""
-    <div style="overflow-x:auto;max-height:560px;border-radius:8px;border:1px solid #333;">
-      <table style="width:100%;border-collapse:collapse;font-family:sans-serif;font-size:13px;">
-        <thead style="position:sticky;top:0;background:#1e222b;color:#f0f2f6;">
-          <tr>{ths}</tr>
-        </thead>
-        <tbody>{body}</tbody>
-      </table>
-    </div>"""
-
-
-def render_metrics_table(comp: dict) -> str:
-    """HTML benchmark comparison table for the Model Performance tab."""
-    rows_html = ""
-    order = [
-        ("Baseline_Naive_Lag1",  "Naive Lag-1 × 7 (Baseline)"),
-        ("Baseline_Rolling_7d",  "Rolling 7-Day Average (Baseline)"),
-        ("Random_Forest_ML",     "🤖 Spark MLlib Random Forest"),
-    ]
-    best_mae  = min(v["MAE"]  for v in comp.values())
-    best_wape = min(v["WAPE"] for v in comp.values())
-
-    for key, label in order:
-        if key not in comp:
-            continue
-        v     = comp[key]
-        is_ml = key == "Random_Forest_ML"
-        bg    = "#12261a" if is_ml else "#15181e"
-        fw    = "font-weight:bold;" if is_ml else ""
-        mae_s = "color:#21c354;font-weight:bold;" if v["MAE"] == best_mae else ""
-        wpe_s = "color:#21c354;font-weight:bold;" if v["WAPE"] == best_wape else ""
-        rows_html += f"""
-        <tr style="background:{bg};border-bottom:1px solid #262730;">
-          <td style="padding:9px 12px;{fw}">{label}</td>
-          <td style="padding:9px 12px;text-align:right;{mae_s}">{v['MAE']}</td>
-          <td style="padding:9px 12px;text-align:right;">{v['RMSE']}</td>
-          <td style="padding:9px 12px;text-align:right;{wpe_s}">{v['WAPE']}%</td>
-        </tr>"""
-
-    return f"""
-    <div style="border-radius:8px;border:1px solid #333;overflow:hidden;max-width:680px;">
-      <table style="width:100%;border-collapse:collapse;font-family:sans-serif;font-size:14px;">
-        <thead style="background:#1e222b;color:#f0f2f6;">
-          <tr>
-            {_th("Model / Baseline")} {_th("MAE","right")} {_th("RMSE","right")} {_th("WAPE","right")}
-          </tr>
-        </thead>
-        <tbody>{rows_html}</tbody>
-      </table>
-    </div>"""
-
-
-def render_history_table(rows: list) -> str:
-    """Compact history table for the Product Detail tab."""
-    if not rows:
-        return "<p style='color:#888;'>No history available.</p>"
-    ths = "".join([
-        _th("Date"), _th("Demand","right"), _th("Inventory","right"),
-        _th("Units Sold","right"), _th("On Order","right"), _th("Promo","center"),
-    ])
-    body = ""
-    for i, r in enumerate(rows[-30:]):   # show last 30 rows in table
-        bg = "#15181e" if i % 2 == 0 else "#0e1117"
-        promo = "✅" if r["promotion"] else "—"
-        body += f"""
-        <tr style="background:{bg};border-bottom:1px solid #262730;">
-          <td style="padding:7px 10px;">{r['date']}</td>
-          <td style="padding:7px 10px;text-align:right;">{int(r['demand'])}</td>
-          <td style="padding:7px 10px;text-align:right;">{int(r['inventory_level'])}</td>
-          <td style="padding:7px 10px;text-align:right;">{int(r['units_sold'])}</td>
-          <td style="padding:7px 10px;text-align:right;">{int(r['units_ordered'])}</td>
-          <td style="padding:7px 10px;text-align:center;">{promo}</td>
-        </tr>"""
-    return f"""
-    <div style="overflow-x:auto;max-height:420px;border-radius:8px;border:1px solid #333;">
-      <table style="width:100%;border-collapse:collapse;font-family:sans-serif;font-size:13px;">
-        <thead style="position:sticky;top:0;background:#1e222b;color:#f0f2f6;">
-          <tr>{ths}</tr>
-        </thead>
-        <tbody>{body}</tbody>
-      </table>
-    </div>"""
-
-
-# ---------------------------------------------------------------------------
-# Main application
-# ---------------------------------------------------------------------------
-
-st.title("📦 Inventory Intelligence Dashboard")
-st.caption(
-    "AI-powered demand forecasting and stock-risk management · "
-    "Spark MLlib Random Forest · Snapshot: near real-time risk engine"
-)
-
-# --- Load data -------------------------------------------------------
-snapshot, snap_err = load_snapshot()
-metrics,  met_err  = load_metrics()
-
-# --- Sidebar ---------------------------------------------------------
-st.sidebar.header("🔍 Filters")
-
-# Store / Product / Category selectors
-sel_store    = st.sidebar.selectbox("Store",    ["ALL"] + ALL_STORES)
-sel_category = st.sidebar.selectbox("Category", ["ALL"] + ALL_CATEGORIES)
-
-# Product list can be filtered if snapshot is available
-if snapshot:
-    prod_in_snap = sorted({r["product_id"] for r in snapshot
-                            if (sel_store == "ALL" or r["store_id"] == sel_store)
-                            and (sel_category == "ALL" or r["category"] == sel_category)})
-else:
-    prod_in_snap = ALL_PRODUCTS
-sel_product = st.sidebar.selectbox("Product", ["ALL"] + prod_in_snap)
-
-st.sidebar.markdown("---")
-st.sidebar.markdown(
-    "**Data sources**\n"
-    "- Risk snapshot: `data/gold/latest_risk_snapshot.json`\n"
-    "- History: `data/raw/sales_data.csv`\n"
-    "- Model metrics: `models/model_metrics.json`"
-)
-
-# --- KPI strip -------------------------------------------------------
-if snapshot:
-    snap_date   = snapshot[0].get("snapshot_date", "unknown")
-    monitored   = len(snapshot)
-    high_so     = sum(1 for r in snapshot if r["stockout_risk"] == "HIGH_STOCKOUT_RISK")
-    elevated_so = sum(1 for r in snapshot if r["stockout_risk"] == "ELEVATED_STOCKOUT_RISK")
-    critical_ov = sum(1 for r in snapshot if r["overstock_risk"] == "CRITICAL_OVERSTOCK")
-    slow_mv     = sum(1 for r in snapshot if r["overstock_risk"] == "SLOW_MOVING")
-
-    k1, k2, k3, k4 = st.columns(4)
-    k1.metric("📦 Products Monitored",   monitored,
-              f"{len({r['store_id'] for r in snapshot})} active stores")
-    k2.metric("🚨 High Stockout Risk",   high_so,
-              f"+{elevated_so} elevated", delta_color="inverse")
-    k3.metric("📉 Overstock / Slow-Moving", critical_ov + slow_mv,
-              f"{critical_ov} critical, {slow_mv} slow", delta_color="inverse")
-    k4.metric("📅 Snapshot Date", snap_date)
-else:
-    st.warning(
-        f"⚠️ Risk snapshot not available.\n\n"
-        f"Expected at: `{SNAPSHOT_PATH}`\n\n"
-        f"Run: `python src/risk/generate_risk_snapshot.py`"
+        st.info("No products match these filters.")
+        return
+    columns = ["Store", "SKU", "Category", "On hand", "Incoming", "7d demand", "Net gap", "Cover (d)", "Stock risk", "Velocity", "Recommended action"]
+    data = []
+    for r in rows[:limit]:
+        data.append({
+            "Store": r.get("store_id", "—"), "SKU": r.get("product_id", "—"),
+            "Category": r.get("category", "—"), "On hand": int(r.get("current_stock", 0)),
+            "Incoming": int(r.get("incoming_orders", 0)),
+            "7d demand": round(float(r.get("forecast_demand_7d", 0)), 1),
+            "Net gap": round(float(r.get("inventory_gap", 0)), 1),
+            "Cover (d)": round(float(r.get("days_of_cover", 0)), 1),
+            "Stock risk": risk_label(r.get("stockout_risk")),
+            "Velocity": risk_label(r.get("overstock_risk")),
+            "Recommended action": r.get("status_action", "—").replace("_", " ").title(),
+        })
+    header = "".join(f"<th>{html.escape(c)}</th>" for c in columns)
+    body = "".join("<tr>" + "".join(f"<td>{html.escape(str(row[c]))}</td>" for c in columns) + "</tr>" for row in data)
+    st.markdown(
+        f'<div class="inventory-table-wrap">'
+        f'<table class="inventory-table"><thead><tr>{header}</tr></thead>'
+        f'<tbody>{body}</tbody></table></div>',
+        unsafe_allow_html=True,
     )
+    if len(rows) > limit:
+        st.caption(f"Showing {limit} of {len(rows)} matching products. Narrow the filters to inspect a smaller set.")
 
-st.markdown("---")
 
-# --- Filter helper ---------------------------------------------------
-def apply_filters(rows):
-    out = rows
-    if sel_store    != "ALL": out = [r for r in out if r["store_id"]  == sel_store]
-    if sel_category != "ALL": out = [r for r in out if r["category"]  == sel_category]
-    if sel_product  != "ALL": out = [r for r in out if r["product_id"]== sel_product]
-    return out
+def chart(values, mark="line", height=300, encoding=None):
+    st.vega_lite_chart({
+        "data": {"values": values}, "width": "container", "height": height,
+        "mark": mark, "encoding": encoding or {},
+    }, width="stretch")
 
-# ---------------------------------------------------------------------------
-# Tabs
-# ---------------------------------------------------------------------------
-(tab_forecast, tab_stockout, tab_overstock,
- tab_detail,   tab_perf) = st.tabs([
-    "📈 Demand Forecast View",
-    "🚨 Stock-Out Watchlist",
-    "📉 Overstock / Slow-Moving",
-    "🔍 Product Detail",
-    "📊 Model Performance",
+
+try:
+    snapshot = load_snapshot()
+    metrics = load_metrics()
+except (OSError, json.JSONDecodeError) as exc:
+    st.error(f"The dashboard could not load its project data: {exc}")
+    st.info("Confirm that the project contains data/gold/latest_risk_snapshot.json and models/model_metrics.json.")
+    st.stop()
+
+if not snapshot:
+    st.error("The inventory risk snapshot is empty. Generate a risk snapshot from the project pipeline, then refresh this page.")
+    st.stop()
+
+snapshot_date = snapshot[0].get("snapshot_date", "Unknown")
+stores = sorted({r.get("store_id", "") for r in snapshot if r.get("store_id")})
+categories = sorted({r.get("category", "") for r in snapshot if r.get("category")})
+
+st.sidebar.markdown("## 📦 Inventory control tower")
+st.sidebar.caption("Demand planning · stock risk · replenishment decisions")
+st.sidebar.markdown("---")
+store_filter = st.sidebar.selectbox("Store", ["All stores", *stores])
+category_filter = st.sidebar.selectbox("Category", ["All categories", *categories])
+risk_filter = st.sidebar.selectbox("Stock risk", ["All risk levels", "HIGH_STOCKOUT_RISK", "ELEVATED_STOCKOUT_RISK", "LOW_STOCKOUT_RISK"])
+st.sidebar.markdown("---")
+st.sidebar.markdown(f"**Forecast horizon**  \n7 days · Spark MLlib Random Forest")
+st.sidebar.caption(f"Risk snapshot: {snapshot_date}")
+if st.sidebar.button("Refresh project data", use_container_width=True):
+    load_snapshot.clear(); load_metrics.clear(); load_history.clear(); st.rerun()
+
+filtered = [r for r in snapshot
+            if (store_filter == "All stores" or r.get("store_id") == store_filter)
+            and (category_filter == "All categories" or r.get("category") == category_filter)
+            and (risk_filter == "All risk levels" or r.get("stockout_risk") == risk_filter)]
+high = [r for r in filtered if r.get("stockout_risk") == "HIGH_STOCKOUT_RISK"]
+elevated = [r for r in filtered if r.get("stockout_risk") == "ELEVATED_STOCKOUT_RISK"]
+overstock = [r for r in filtered if r.get("overstock_risk") in ("CRITICAL_OVERSTOCK", "SLOW_MOVING")]
+shortfall = sum(max(0, -float(r.get("inventory_gap", 0))) for r in filtered)
+forecast_total = sum(float(r.get("forecast_demand_7d", 0)) for r in filtered)
+
+st.markdown('<div class="hero"><div class="eyebrow">Inventory operations · snapshot ' + html.escape(str(snapshot_date)) + '</div><h2>Know what will run out. Act before it does.</h2><p>Seven-day demand forecasts translated into a prioritized replenishment and excess-stock plan.</p></div>', unsafe_allow_html=True)
+
+k1, k2, k3, k4, k5 = st.columns(5)
+k1.metric("SKUs in view", f"{len(filtered):,}", f"{len({r.get('store_id') for r in filtered})} stores")
+k2.metric("Urgent stockouts", f"{len(high):,}", "Forecast exceeds available stock", delta_color="inverse")
+k3.metric("Watch list", f"{len(elevated):,}", "Below safety buffer", delta_color="inverse")
+k4.metric("7-day demand", f"{forecast_total:,.0f}", "units across selected SKUs")
+k5.metric("Uncovered demand", f"{shortfall:,.0f}", "units to replenish", delta_color="inverse")
+
+tab_overview, tab_risk, tab_forecast, tab_actions, tab_model = st.tabs([
+    "Overview", "Stock risk", "Forecast explorer", "Replenishment planner", "Model & data"
 ])
 
-# ═══════════════════════════════════════════════════════════════════════
-# TAB 1 — DEMAND FORECAST VIEW
-# Shows actual daily demand vs the model's 7-day forward forecast
-# ═══════════════════════════════════════════════════════════════════════
+with tab_overview:
+    left, right = st.columns([1.35, 1])
+    with left:
+        st.subheader("Demand by category")
+        cats = defaultdict(float)
+        for r in filtered: cats[r.get("category", "Other")] += float(r.get("forecast_demand_7d", 0))
+        values = [{"category": k, "units": round(v, 1)} for k, v in sorted(cats.items(), key=lambda kv: -kv[1])]
+        if values:
+            chart(values, mark={"type": "bar", "cornerRadiusEnd": 5, "color": "#27835c"}, height=250,
+                  encoding={"x": {"field": "units", "type": "quantitative", "title": "Forecast demand (units)"},
+                            "y": {"field": "category", "type": "nominal", "sort": "-x", "title": None},
+                            "tooltip": [{"field": "category"}, {"field": "units", "format": ",.1f"}]})
+    with right:
+        st.subheader("Portfolio stock exposure")
+        counts = [{"state": "Urgent", "skus": len(high)}, {"state": "Watch", "skus": len(elevated)},
+                  {"state": "Healthy", "skus": max(0, len(filtered) - len(high) - len(elevated))}]
+        chart(counts, mark={"type": "arc", "innerRadius": 65, "outerRadius": 105}, height=250,
+              encoding={"theta": {"field": "skus", "type": "quantitative"},
+                        "color": {"field": "state", "type": "nominal", "scale": {"domain": ["Urgent", "Watch", "Healthy"], "range": ["#c74b43", "#e4a03a", "#45956c"]}},
+                        "tooltip": [{"field": "state"}, {"field": "skus"}]})
+    st.subheader("Priority queue")
+    st.caption("Highest shortfall first. Use the replenishment planner to test order quantities against lead time and safety stock.")
+    priority = sorted(filtered, key=lambda r: (0 if r.get("stockout_risk") == "HIGH_STOCKOUT_RISK" else 1 if r.get("stockout_risk") == "ELEVATED_STOCKOUT_RISK" else 2, float(r.get("inventory_gap", 0))))
+    render_table(priority, 12)
+
+with tab_risk:
+    st.subheader("Stock-out and slow-moving watchlists")
+    urgent, slow = st.tabs([f"Replenishment risk · {len(high) + len(elevated)}", f"Excess & slow-moving · {len(overstock)}"])
+    with urgent:
+        st.markdown("#### Items needing attention")
+        st.caption("Risk uses the saved seven-day model forecast and the deterministic inventory policy. Net gap = on-hand + incoming − forecast.")
+        risk_rows = sorted([r for r in filtered if r.get("stockout_risk") in ("HIGH_STOCKOUT_RISK", "ELEVATED_STOCKOUT_RISK")], key=lambda r: (0 if r.get("stockout_risk") == "HIGH_STOCKOUT_RISK" else 1, float(r.get("inventory_gap", 0))))
+        render_table(risk_rows)
+    with slow:
+        st.markdown("#### Capital tied up in excess inventory")
+        st.caption("High cover signals inventory that may need a purchase pause, markdown, or bundle review.")
+        render_table(sorted(overstock, key=lambda r: -float(r.get("days_of_cover", 0))))
+
 with tab_forecast:
-    st.subheader("Demand Forecast View")
-
-    if sel_store == "ALL" or sel_product == "ALL":
-        st.info(
-            "Select a specific **Store** and **Product** in the sidebar "
-            "to see the demand chart and forecast details."
-        )
-    else:
-        hist, hist_err = load_raw_history(sel_store, sel_product, days=60)
-        if hist_err:
-            st.error(f"⚠️ Could not load history: {hist_err}")
+    st.subheader("SKU demand and inventory trajectory")
+    stores_for_sku = sorted({r.get("store_id") for r in snapshot if r.get("store_id")})
+    selected_store = st.selectbox("Choose a store", stores_for_sku, key="forecast_store")
+    candidates = [r for r in snapshot if r.get("store_id") == selected_store]
+    product_options = sorted({r.get("product_id") for r in candidates if r.get("product_id")})
+    selected_product = st.selectbox("Choose a product", product_options, key="forecast_product")
+    rec = next((r for r in candidates if r.get("product_id") == selected_product), None)
+    if rec:
+        hist = load_history(selected_store, selected_product)
+        if hist:
+            fc, stock, cover, gap = st.columns(4)
+            fc.metric("7-day ML forecast", f"{float(rec.get('forecast_demand_7d', 0)):,.1f} units")
+            stock.metric("Current on hand", f"{int(rec.get('current_stock', 0)):,} units")
+            cover.metric("Days of cover", f"{float(rec.get('days_of_cover', 0)):.1f} days")
+            gap.metric("Net inventory gap", f"{float(rec.get('inventory_gap', 0)):+,.1f} units")
+            window = st.slider("History window", min_value=30, max_value=min(365, len(hist)), value=min(90, len(hist)), step=15)
+            view = hist[-window:]
+            series = [{"date": r["date"], "value": r["demand"], "series": "Actual demand"} for r in view]
+            daily_forecast = float(rec.get("forecast_demand_7d", 0)) / 7
+            last_date = dt.date.fromisoformat(hist[-1]["date"])
+            for i in range(1, 8):
+                series.append({"date": (last_date + dt.timedelta(days=i)).isoformat(), "value": daily_forecast, "series": "ML forecast · daily avg"})
+            chart(series, mark={"type": "line", "point": {"filled": True, "size": 25}}, height=330,
+                  encoding={"x": {"field": "date", "type": "temporal", "title": "Date", "axis": {"labelAngle": -30}},
+                            "y": {"field": "value", "type": "quantitative", "title": "Units per day"},
+                            "color": {"field": "series", "type": "nominal", "scale": {"domain": ["Actual demand", "ML forecast · daily avg"], "range": ["#4787b5", "#e18a38"]}},
+                            "tooltip": [{"field": "date", "type": "temporal"}, {"field": "value", "format": ",.1f"}, {"field": "series"}]})
+            stock_series = [{"date": r["date"], "value": r["stock"]} for r in view]
+            st.markdown("#### Inventory position history")
+            chart(stock_series, mark={"type": "area", "color": "#55a27a", "opacity": 0.3, "line": {"color": "#35835d"}}, height=180,
+                  encoding={"x": {"field": "date", "type": "temporal", "title": None}, "y": {"field": "value", "type": "quantitative", "title": "On-hand units"}, "tooltip": [{"field": "date", "type": "temporal"}, {"field": "value", "format": ",.0f"}]})
+            st.info(f"**{rec.get('status_action', '—').replace('_', ' ').title()}** · {rec.get('recommendation', 'No recommendation available.')}")
+            st.caption("The orange segment is the 7-day model total spread evenly as a daily reference; it is not a separately trained daily forecast.")
         else:
-            # Find matching snapshot record (the ML forecast)
-            snap_rec = None
-            if snapshot:
-                for r in snapshot:
-                    if r["store_id"] == sel_store and r["product_id"] == sel_product:
-                        snap_rec = r
-                        break
+            st.warning("No matching historical sales rows were found for this store and product.")
 
-            # Info cards
-            if snap_rec:
-                fc1, fc2, fc3, fc4 = st.columns(4)
-                fc1.metric("Current Stock",      f"{snap_rec['current_stock']:,} units")
-                fc2.metric("Incoming Orders",    f"{snap_rec['incoming_orders']:,} units")
-                fc3.metric("7-Day ML Forecast",  f"{snap_rec['forecast_demand_7d']:.1f} units")
-                fc4.metric("Days of Cover",      f"{snap_rec['days_of_cover']:.1f} days")
-                st.caption(
-                    f"Store **{sel_store}** · Product **{sel_product}** · "
-                    f"Category: **{snap_rec['category']}** · "
-                    f"Region: **{snap_rec.get('region','—')}** · "
-                    f"Snapshot date: `{snap_rec['snapshot_date']}`"
-                )
-
-            st.markdown("#### Last 60 Days – Actual Daily Demand")
-            st.caption(
-                "The **blue bars** show actual recorded demand (units/day) from the raw sales data. "
-                "The **orange dashed line** shows the model's 7-day cumulative forecast "
-                "(from the risk snapshot) as a daily-average reference line."
-            )
-
-            # Build vega-lite chart data (plain list of dicts — no pandas)
-            chart_data = [
-                {"date": r["date"], "Actual Demand": r["demand"]}
-                for r in hist
-            ]
-
-            # Optional: overlay forecast daily average as a constant rule line
-            forecast_daily_avg = None
-            if snap_rec:
-                forecast_daily_avg = round(snap_rec["forecast_demand_7d"] / 7, 2)
-
-            vega_spec = {
-                "width": "container",
-                "height": 320,
-                "layer": [
-                    {
-                        "mark": {"type": "bar", "color": "#4c9be8", "opacity": 0.85},
-                        "encoding": {
-                            "x": {"field": "date", "type": "temporal",
-                                  "title": "Date",
-                                  "axis": {"labelAngle": -35}},
-                            "y": {"field": "Actual Demand", "type": "quantitative",
-                                  "title": "Demand (units)"},
-                            "tooltip": [
-                                {"field": "date", "type": "temporal", "title": "Date"},
-                                {"field": "Actual Demand", "type": "quantitative"},
-                            ],
-                        },
-                    },
-                ],
-                "data": {"values": chart_data},
-            }
-
-            # Add forecast reference line if available
-            if forecast_daily_avg is not None:
-                vega_spec["layer"].append({
-                    "mark": {
-                        "type": "rule",
-                        "color": "#ff7043",
-                        "strokeWidth": 2,
-                        "strokeDash": [6, 3],
-                    },
-                    "encoding": {
-                        "y": {"datum": forecast_daily_avg,
-                              "type": "quantitative"},
-                        "tooltip": [
-                            {"value": f"ML Forecast daily avg: {forecast_daily_avg} units"}
-                        ],
-                    },
-                })
-                st.caption(
-                    f"🟠 Orange line = ML forecast daily average "
-                    f"({snap_rec['forecast_demand_7d']:.1f} ÷ 7 = **{forecast_daily_avg} units/day**)"
-                )
-
-            st.vega_lite_chart(vega_spec, use_container_width=True)
-
-            # Inventory level sub-chart
-            st.markdown("#### Inventory Level Over Time")
-            inv_data = [
-                {"date": r["date"], "Inventory Level": r["inventory_level"]}
-                for r in hist
-            ]
-            inv_spec = {
-                "width": "container", "height": 200,
-                "mark": {"type": "area", "color": "#5c8a8a", "opacity": 0.6,
-                         "line": {"color": "#5c8a8a"}},
-                "encoding": {
-                    "x": {"field": "date", "type": "temporal",
-                          "title": "Date", "axis": {"labelAngle": -35}},
-                    "y": {"field": "Inventory Level", "type": "quantitative",
-                          "title": "On-Hand Units"},
-                    "tooltip": [
-                        {"field": "date", "type": "temporal", "title": "Date"},
-                        {"field": "Inventory Level", "type": "quantitative"},
-                    ],
-                },
-                "data": {"values": inv_data},
-            }
-            st.vega_lite_chart(inv_spec, use_container_width=True)
-
-            # Risk callout (if snapshot available)
-            if snap_rec:
-                st.markdown("#### Risk Assessment (from latest snapshot)")
-                action_map = {
-                    "EXPEDITE_ORDER":  ("🚨", "error",   "Urgent replenishment — expedite order immediately."),
-                    "MONITOR_REORDER": ("⚠️", "warning", "Stock running low — raise purchase order soon."),
-                    "PROMO_DISCOUNT":  ("📢", "warning", "Excess inventory — consider promotion or discount."),
-                    "DELAY_PURCHASE":  ("⏸️", "info",    "Overstock detected — delay next purchase order."),
-                    "MAINTAIN_NORMAL": ("✅", "success", "Inventory healthy — maintain normal ordering cadence."),
-                }
-                icon, level, default_msg = action_map.get(
-                    snap_rec["status_action"], ("ℹ️", "info", "")
-                )
-                msg = f"{icon} **{snap_rec['status_action']}** · {snap_rec['recommendation']}"
-                getattr(st, level)(msg)
-
-
-# ═══════════════════════════════════════════════════════════════════════
-# TAB 2 — STOCK-OUT WATCHLIST
-# ═══════════════════════════════════════════════════════════════════════
-with tab_stockout:
-    st.subheader("🚨 Stock-Out Watchlist")
-    st.caption(
-        "Products where forecast demand **exceeds available stock** within 7 days. "
-        "Sorted by severity (HIGH first), then by days-of-cover ascending."
-    )
-
-    if snap_err:
-        st.error(snap_err)
-    elif snapshot:
-        so_rows = [
-            r for r in snapshot
-            if r["stockout_risk"] in ("HIGH_STOCKOUT_RISK", "ELEVATED_STOCKOUT_RISK")
-        ]
-        so_rows = apply_filters(so_rows)
-        so_rows.sort(
-            key=lambda r: (
-                0 if r["stockout_risk"] == "HIGH_STOCKOUT_RISK" else 1,
-                r["days_of_cover"]
-            )
-        )
-
-        high_n = sum(1 for r in so_rows if r["stockout_risk"] == "HIGH_STOCKOUT_RISK")
-        elev_n = sum(1 for r in so_rows if r["stockout_risk"] == "ELEVATED_STOCKOUT_RISK")
-        st.markdown(
-            f"Showing **{len(so_rows)}** at-risk SKUs &nbsp;·&nbsp; "
-            f"🔴 {high_n} HIGH &nbsp;·&nbsp; 🟡 {elev_n} ELEVATED"
-        )
-        st.markdown(render_risk_table(so_rows), unsafe_allow_html=True)
-
-        st.caption(
-            "**Inventory Gap** = (current stock + incoming orders) − 7-day forecast.  "
-            "Negative = shortfall.  "
-            "**Days of Cover** = current stock ÷ (forecast ÷ 7)."
-        )
+with tab_actions:
+    st.subheader("Replenishment planner")
+    st.caption("Try an order quantity and lead time to see whether the item remains covered through delivery. This is a planning scenario; it does not place a purchase order.")
+    action_store = st.selectbox("Store", stores_for_sku, key="planner_store")
+    action_candidates = [r for r in snapshot if r.get("store_id") == action_store]
+    action_product = st.selectbox("Product", sorted(r["product_id"] for r in action_candidates), key="planner_product")
+    ar = next(r for r in action_candidates if r.get("product_id") == action_product)
+    a, b, c = st.columns(3)
+    lead_days = a.number_input("Supplier lead time (days)", min_value=1, max_value=60, value=7)
+    order_qty = b.number_input("Proposed order (units)", min_value=0, max_value=100000, value=max(0, int(-min(float(ar.get("inventory_gap", 0)), 0))))
+    safety_pct = c.slider("Safety buffer", min_value=0, max_value=50, value=15, format="%d%%")
+    daily = float(ar.get("forecast_demand_7d", 0)) / 7
+    need_by_delivery = daily * lead_days * (1 + safety_pct / 100)
+    available_at_delivery = float(ar.get("current_stock", 0)) + float(ar.get("incoming_orders", 0)) + order_qty
+    buffer_after_delivery = available_at_delivery - need_by_delivery
+    p1, p2, p3 = st.columns(3)
+    p1.metric("Demand through lead time + buffer", f"{need_by_delivery:,.1f} units")
+    p2.metric("Projected available", f"{available_at_delivery:,.0f} units")
+    p3.metric("Position after lead time", f"{buffer_after_delivery:+,.1f} units", delta_color="normal")
+    if buffer_after_delivery < 0:
+        st.error(f"Projected shortfall of {abs(buffer_after_delivery):,.1f} units before/through replenishment. Expedite or increase the order.")
+    elif float(ar.get("days_of_cover", 0)) > 45:
+        st.warning("This item is already classified as critical overstock. Review whether this proposed purchase should be delayed.")
     else:
-        st.info("No snapshot data loaded.")
+        st.success("Proposed quantity covers forecast demand through the supplier lead time and selected safety buffer.")
+    st.markdown("#### Selected SKU recommendation")
+    render_table([ar], 1)
 
+with tab_model:
+    st.subheader("Forecast model & data confidence")
+    val = metrics.get("validation_comparison", {})
+    test = metrics.get("test_performance", {})
+    meta1, meta2, meta3, meta4 = st.columns(4)
+    meta1.metric("Model", "Random Forest")
+    meta2.metric("Validation WAPE", f"{val.get('Random_Forest_ML', {}).get('WAPE', '—')}%")
+    meta3.metric("Held-out test WAPE", f"{test.get('WAPE', '—')}%")
+    meta4.metric("Forecast horizon", "7 days")
+    comparison = []
+    for key, label in [("Baseline_Naive_Lag1", "Naive lag-1"), ("Baseline_Rolling_7d", "Rolling 7-day"), ("Random_Forest_ML", "Spark MLlib random forest")]:
+        if key in val:
+            comparison.extend([{"model": label, "metric": "WAPE", "value": float(val[key]["WAPE"])},
+                               {"model": label, "metric": "MAE", "value": float(val[key]["MAE"])}])
+    st.markdown("#### Validation benchmarks")
+    chart(comparison, mark={"type": "bar", "cornerRadiusEnd": 4}, height=270,
+          encoding={"x": {"field": "value", "type": "quantitative", "title": "Error (WAPE % or MAE units)"},
+                    "y": {"field": "model", "type": "nominal", "sort": "-x", "title": None},
+                    "color": {"field": "metric", "type": "nominal", "scale": {"domain": ["WAPE", "MAE"], "range": ["#297c58", "#86ad99"]}},
+                    "tooltip": [{"field": "model"}, {"field": "metric"}, {"field": "value", "format": ",.2f"}]})
+    splits = metrics.get("chronological_splits", {})
+    st.markdown("#### Evaluation periods")
+    s1, s2, s3 = st.columns(3)
+    s1.markdown(f"**Training**  \n{splits.get('train_period', '—')}")
+    s2.markdown(f"**Validation**  \n{splits.get('val_period', '—')}")
+    s3.markdown(f"**Held-out test**  \n{splits.get('test_period', '—')}")
+    with st.expander("Features supplied to the model"):
+        st.write(", ".join(metrics.get("features", [])))
+    st.markdown("#### Load new sales history")
+    uploaded = st.file_uploader("Upload a CSV to inspect its coverage", type=["csv"], help="Expected columns include Date, Store ID, Product ID, and Demand.")
+    if uploaded:
+        try:
+            rows = list(csv.DictReader(uploaded.getvalue().decode("utf-8-sig").splitlines()))
+            required = {"Date", "Store ID", "Product ID", "Demand"}
+            if not rows or not required.issubset(rows[0]):
+                st.error("This CSV is missing required columns: Date, Store ID, Product ID, Demand.")
+            else:
+                st.success(f"Loaded {len(rows):,} rows for review · {len({r['Product ID'] for r in rows})} products · {min(r['Date'] for r in rows)} to {max(r['Date'] for r in rows)}.")
+                st.caption("This preview does not retrain or replace the saved Spark model. Run the project's feature engineering and training pipeline to publish an updated model and risk snapshot.")
+        except (UnicodeDecodeError, csv.Error, KeyError) as exc:
+            st.error(f"Could not read this CSV: {exc}")
 
-# ═══════════════════════════════════════════════════════════════════════
-# TAB 3 — OVERSTOCK / SLOW-MOVING WATCHLIST
-# ═══════════════════════════════════════════════════════════════════════
-with tab_overstock:
-    st.subheader("📉 Overstock & Slow-Moving Watchlist")
-    st.caption(
-        "Products where stock significantly **exceeds** 7-day forecast demand, "
-        "indicating excess holding costs or weak sell-through."
-    )
-
-    if snap_err:
-        st.error(snap_err)
-    elif snapshot:
-        ov_rows = [
-            r for r in snapshot
-            if r["overstock_risk"] in ("CRITICAL_OVERSTOCK", "SLOW_MOVING")
-        ]
-        ov_rows = apply_filters(ov_rows)
-        ov_rows.sort(
-            key=lambda r: (
-                0 if r["overstock_risk"] == "CRITICAL_OVERSTOCK" else 1,
-                -r["days_of_cover"]   # highest cover first
-            )
-        )
-
-        crit_n = sum(1 for r in ov_rows if r["overstock_risk"] == "CRITICAL_OVERSTOCK")
-        slow_n = sum(1 for r in ov_rows if r["overstock_risk"] == "SLOW_MOVING")
-        st.markdown(
-            f"Showing **{len(ov_rows)}** overstocked SKUs &nbsp;·&nbsp; "
-            f"🟣 {crit_n} CRITICAL &nbsp;·&nbsp; 🟡 {slow_n} SLOW-MOVING"
-        )
-        st.markdown(
-            render_risk_table(ov_rows, include_overstock_col=True),
-            unsafe_allow_html=True,
-        )
-
-        st.caption(
-            "**Days of Cover** > 21 = slow-moving. > 45 = critical overstock (rule thresholds).  "
-            "Consider promotional pricing, order delays, or inter-store transfers."
-        )
-    else:
-        st.info("No snapshot data loaded.")
-
-
-# ═══════════════════════════════════════════════════════════════════════
-# TAB 4 — PRODUCT DETAIL VIEW
-# ═══════════════════════════════════════════════════════════════════════
-with tab_detail:
-    st.subheader("🔍 Product Detail View")
-
-    if sel_store == "ALL" or sel_product == "ALL":
-        st.info(
-            "Select a specific **Store** and **Product** in the sidebar "
-            "to see the full 90-day history and risk breakdown."
-        )
-    else:
-        hist90, hist90_err = load_raw_history(sel_store, sel_product, days=90)
-
-        # --- Snapshot record (risk engine output) ---
-        snap_rec = None
-        if snapshot:
-            for r in snapshot:
-                if r["store_id"] == sel_store and r["product_id"] == sel_product:
-                    snap_rec = r
-                    break
-
-        st.markdown(f"#### {sel_store} · {sel_product}")
-
-        if snap_rec:
-            # Summary cards
-            d1, d2, d3, d4, d5 = st.columns(5)
-            d1.metric("Category",       snap_rec["category"])
-            d2.metric("Region",         snap_rec.get("region", "—"))
-            d3.metric("Current Stock",  f"{snap_rec['current_stock']:,}")
-            d4.metric("On Order",       f"{snap_rec['incoming_orders']:,}")
-            d5.metric("Days of Cover",  f"{snap_rec['days_of_cover']:.1f}")
-
-            # Risk row
-            r1, r2, r3 = st.columns(3)
-            r1.markdown(f"**Stockout Risk:** {_badge(snap_rec['stockout_risk'])}", unsafe_allow_html=True)
-            r2.markdown(f"**Overstock Risk:** {_badge(snap_rec['overstock_risk'])}", unsafe_allow_html=True)
-            r3.markdown(f"**Recommended Action:** {_badge(snap_rec['status_action'])}", unsafe_allow_html=True)
-
-            st.info(f"📋 **Guidance:** {snap_rec['recommendation']}")
-            st.caption(
-                f"7-Day ML Forecast: **{snap_rec['forecast_demand_7d']:.1f} units** · "
-                f"Inventory Gap: **{snap_rec['inventory_gap']:+.1f} units** · "
-                f"Price: USD {snap_rec.get('price', 0):.2f} · "
-                f"Snapshot: `{snap_rec['snapshot_date']}`"
-            )
-        else:
-            st.warning(
-                f"No snapshot record found for {sel_store}/{sel_product}. "
-                f"Check that `generate_risk_snapshot.py` ran successfully."
-            )
-
-        st.markdown("---")
-        st.markdown("#### 90-Day Demand & Inventory History")
-
-        if hist90_err:
-            st.error(f"⚠️ {hist90_err}")
-        else:
-            # Combined line chart: Demand + Inventory Level
-            combo_data = []
-            for r in hist90:
-                combo_data.append({"date": r["date"], "metric": "Actual Demand",   "value": r["demand"]})
-                combo_data.append({"date": r["date"], "metric": "Inventory Level",  "value": r["inventory_level"]})
-
-            combo_spec = {
-                "width": "container", "height": 300,
-                "mark": "line",
-                "encoding": {
-                    "x": {"field": "date", "type": "temporal",
-                          "title": "Date", "axis": {"labelAngle": -35}},
-                    "y": {"field": "value", "type": "quantitative", "title": "Units"},
-                    "color": {
-                        "field": "metric", "type": "nominal",
-                        "scale": {"range": ["#4c9be8", "#f4a261"]},
-                    },
-                    "tooltip": [
-                        {"field": "date",   "type": "temporal",     "title": "Date"},
-                        {"field": "metric", "type": "nominal",      "title": "Metric"},
-                        {"field": "value",  "type": "quantitative", "title": "Value"},
-                    ],
-                },
-                "data": {"values": combo_data},
-            }
-            st.vega_lite_chart(combo_spec, use_container_width=True)
-            st.caption(
-                "🔵 Blue = actual daily demand  ·  🟠 Orange = on-hand inventory level  "
-                "(last 90 calendar days, from raw sales CSV)"
-            )
-
-            # Promotion activity
-            promo_days = sum(1 for r in hist90 if r["promotion"])
-            if promo_days:
-                st.caption(f"📢 **Promotion active on {promo_days} of {len(hist90)} days** in this window.")
-
-            st.markdown("#### Last 30 Days — Tabular History")
-            st.caption("Scroll table to see all columns.  Shows the 30 most recent records.")
-            st.markdown(render_history_table(hist90), unsafe_allow_html=True)
-
-        # --- Demand rate summary ---
-        if hist90 and not hist90_err:
-            demands = [r["demand"] for r in hist90]
-            avg_d   = sum(demands) / len(demands)
-            max_d   = max(demands)
-            min_d   = min(demands)
-            st.markdown("#### Demand Statistics (Last 90 Days)")
-            s1, s2, s3 = st.columns(3)
-            s1.metric("Average Daily Demand", f"{avg_d:.1f} units")
-            s2.metric("Peak Daily Demand",    f"{max_d:.0f} units")
-            s3.metric("Minimum Daily Demand", f"{min_d:.0f} units")
-
-
-# ═══════════════════════════════════════════════════════════════════════
-# TAB 5 — MODEL PERFORMANCE
-# ═══════════════════════════════════════════════════════════════════════
-with tab_perf:
-    st.subheader("📊 Forecasting Model Performance")
-
-    if met_err:
-        st.error(met_err)
-    elif metrics:
-        splits = metrics.get("chronological_splits", {})
-        tp     = metrics.get("test_performance", {})
-        comp   = metrics.get("validation_comparison", {})
-        feat   = metrics.get("features", [])
-
-        # Model spec
-        st.markdown(
-            f"**Model:** `{metrics.get('model_type')}` · "
-            f"**{metrics.get('trees')} trees** · "
-            f"**Max depth {metrics.get('max_depth')}** · "
-            f"**Target:** `{metrics.get('target')}`"
-        )
-
-        st.markdown("#### Chronological Train / Val / Test Split")
-        sc1, sc2, sc3 = st.columns(3)
-        sc1.info(f"**Training**\n\n{splits.get('train_period','—')}\n\n~50,300 rows")
-        sc2.info(f"**Validation**\n\n{splits.get('val_period','—')}\n\n~12,200 rows")
-        sc3.info(f"**Held-out Test**\n\n{splits.get('test_period','—')}\n\n~10,000 rows")
-
-        st.markdown("---")
-        st.markdown("#### Benchmark Comparison (Validation Set)")
-        st.markdown(render_metrics_table(comp), unsafe_allow_html=True)
-        st.caption(
-            "**MAE** = Mean Absolute Error (units) · **RMSE** = Root Mean Squared Error · "
-            "**WAPE** = Weighted Absolute Percentage Error (lower is better).  "
-            "🟢 Green = best result in each metric."
-        )
-
-        st.markdown("---")
-        st.markdown("#### Hold-out Test Performance (unseen data)")
-        t1, t2, t3 = st.columns(3)
-        t1.metric("Test MAE",  f"{tp.get('MAE','—')} units")
-        t2.metric("Test RMSE", f"{tp.get('RMSE','—')} units")
-        t3.metric("Test WAPE", f"{tp.get('WAPE','—')}%")
-        st.caption(
-            "Test period is strictly after the validation period — the model was never "
-            "trained or tuned on these dates, ensuring a realistic out-of-sample estimate."
-        )
-
-        # Feature list
-        st.markdown("---")
-        st.markdown("#### Features Used by the Model")
-        cols = st.columns(3)
-        for idx, feat_name in enumerate(feat):
-            cols[idx % 3].markdown(f"- `{feat_name}`")
-
-        # Improvement summary
-        if "Baseline_Naive_Lag1" in comp and "Random_Forest_ML" in comp:
-            naive_wape = comp["Baseline_Naive_Lag1"]["WAPE"]
-            ml_wape    = comp["Random_Forest_ML"]["WAPE"]
-            lift_pct   = round((naive_wape - ml_wape) / naive_wape * 100, 1)
-            st.success(
-                f"✅ The ML model reduced WAPE by **{lift_pct}%** vs the naive lag baseline "
-                f"({naive_wape}% → {ml_wape}%) on the validation set."
-            )
-    else:
-        st.info("No model metrics available yet.")
-
-# ---------------------------------------------------------------------------
-# Footer
-# ---------------------------------------------------------------------------
 st.markdown("---")
-st.caption(
-    "Inventory Intelligence Dashboard · "
-    "Spark MLlib Random Forest · "
-    "Data as of snapshot date shown above · "
-    "No pandas / pyarrow dependencies (Windows Device Guard–safe)"
-)
+st.caption("Inventory Intelligence · Forecasts and risk flags use the latest saved project snapshot. Refresh the snapshot after running the scoring pipeline to update recommendations.")

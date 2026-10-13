@@ -3,3 +3,6 @@ ipykernel
 pandas==3.0.6
 xgboost==3.4.1
 scikit-learn==1.9.1
+streamlit>=1.40,<2.0
+fastapi>=0.110,<1.0
+uvicorn[standard]>=0.27,<1.0
