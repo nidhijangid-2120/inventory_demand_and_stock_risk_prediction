@@ -37,13 +37,32 @@ def calculate_wape(df, label_col="target_demand_next_7d", pred_col="prediction")
         return (metrics["sum_abs_err"] / metrics["sum_actual"]) * 100.0
     return 0.0
 
-def train_and_evaluate(spark, gold_path: str, model_output_path: str):
+def train_and_evaluate(
+    spark,
+    gold_path: str,
+    model_output_path: str,
+    metrics_path: str = "models/model_metrics.json",
+):
     print(f"--- [Phase 3] Loading Gold Dataset from {gold_path} ---")
     df = spark.read.parquet(gold_path)
 
-    # 1. Chronological Split (Strictly Time-Based)
-    train_end = "2023-06-15"
-    val_end = "2023-10-15"
+    # 1. Chronological split based on this dataset's own date range.
+    # Fixed calendar cutoffs made uploads with newer/shorter date ranges
+    # produce empty training or evaluation windows.
+    observed_dates = [
+        row["date"]
+        for row in df.select(F.col("date").cast("string").alias("date"))
+        .distinct()
+        .orderBy("date")
+        .collect()
+    ]
+    if len(observed_dates) < 3:
+        raise ValueError("At least three distinct dates are required for chronological training splits.")
+    train_index = max(0, int(len(observed_dates) * 0.70) - 1)
+    val_index = max(train_index + 1, int(len(observed_dates) * 0.85) - 1)
+    val_index = min(val_index, len(observed_dates) - 2)
+    train_end = observed_dates[train_index]
+    val_end = observed_dates[val_index]
 
     train_df = df.filter(F.col("date") <= train_end).cache()
     val_df = df.filter((F.col("date") > train_end) & (F.col("date") <= val_end)).cache()
@@ -146,11 +165,13 @@ def train_and_evaluate(spark, gold_path: str, model_output_path: str):
         }
     }
 
-    os.makedirs("models", exist_ok=True)
-    with open("models/model_metrics.json", "w") as f:
+    metrics_dir = os.path.dirname(metrics_path)
+    if metrics_dir:
+        os.makedirs(metrics_dir, exist_ok=True)
+    with open(metrics_path, "w", encoding="utf-8") as f:
         json.dump(metrics_summary, f, indent=2)
 
-    print("Model metrics saved to models/model_metrics.json")
+    print(f"Model metrics saved to {metrics_path}")
     return model_rf, metrics_summary
 
 if __name__ == "__main__":

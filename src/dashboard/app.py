@@ -12,6 +12,9 @@ import datetime as dt
 import html
 import json
 import os
+import subprocess
+import sys
+import uuid
 from collections import defaultdict
 
 import streamlit as st
@@ -113,6 +116,28 @@ BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 SNAPSHOT_PATH = os.path.join(BASE_DIR, "data", "gold", "latest_risk_snapshot.json")
 METRICS_PATH = os.path.join(BASE_DIR, "models", "model_metrics.json")
 SALES_PATH = os.path.join(BASE_DIR, "data", "raw", "sales_data.csv")
+ACTIVE_RUN_PATH = os.path.join(BASE_DIR, "data", "processed", "active_retraining_run.json")
+RETRAIN_SCRIPT = os.path.join(BASE_DIR, "src", "processing", "retrain_pipeline.py")
+EXPECTED_COLUMNS = [
+    "Date", "Store ID", "Product ID", "Category", "Region",
+    "Inventory Level", "Units Sold", "Units Ordered", "Price", "Discount",
+    "Weather Condition", "Promotion", "Competitor Pricing", "Seasonality",
+    "Epidemic", "Demand",
+]
+
+
+def active_run_config():
+    try:
+        with open(ACTIVE_RUN_PATH, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def active_path(config, key, fallback):
+    if not config or not config.get(key):
+        return fallback
+    return os.path.abspath(os.path.join(BASE_DIR, config[key].replace("/", os.sep)))
 
 st.markdown("""
 <style>
@@ -196,22 +221,22 @@ input, textarea, [data-baseweb="select"] > div {
 
 
 @st.cache_data(show_spinner="Loading inventory and sales data…")
-def load_snapshot():
-    with open(SNAPSHOT_PATH, encoding="utf-8") as f:
+def load_snapshot(path):
+    with open(path, encoding="utf-8") as f:
         data = json.load(f)
     return data if isinstance(data, list) else []
 
 
 @st.cache_data(show_spinner="Loading model scorecard…")
-def load_metrics():
-    with open(METRICS_PATH, encoding="utf-8") as f:
+def load_metrics(path):
+    with open(path, encoding="utf-8") as f:
         return json.load(f)
 
 
 @st.cache_data(show_spinner="Reading sales history…")
-def load_history(store_id: str, product_id: str):
+def load_history(store_id: str, product_id: str, path: str):
     rows = []
-    with open(SALES_PATH, newline="", encoding="utf-8-sig") as f:
+    with open(path, newline="", encoding="utf-8-sig") as f:
         for r in csv.DictReader(f):
             if r.get("Store ID") == store_id and r.get("Product ID") == product_id:
                 rows.append({
@@ -279,9 +304,14 @@ def chart(values, mark="line", height=300, encoding=None):
     }, width="stretch")
 
 
+active_run = active_run_config()
+current_snapshot_path = active_path(active_run, "snapshot_path", SNAPSHOT_PATH)
+current_metrics_path = active_path(active_run, "metrics_path", METRICS_PATH)
+current_sales_path = active_path(active_run, "sales_path", SALES_PATH)
+
 try:
-    snapshot = load_snapshot()
-    metrics = load_metrics()
+    snapshot = load_snapshot(current_snapshot_path)
+    metrics = load_metrics(current_metrics_path)
 except (OSError, json.JSONDecodeError) as exc:
     st.error(f"The dashboard could not load its project data: {exc}")
     st.info("Confirm that the project contains data/gold/latest_risk_snapshot.json and models/model_metrics.json.")
@@ -304,6 +334,8 @@ risk_filter = st.sidebar.selectbox("Stock risk", ["All risk levels", "HIGH_STOCK
 st.sidebar.markdown("---")
 st.sidebar.markdown(f"**Forecast horizon**  \n7 days · Spark MLlib Random Forest")
 st.sidebar.caption(f"Risk snapshot: {snapshot_date}")
+if active_run:
+    st.sidebar.caption(f"Active upload: {active_run.get('dataset_name', 'uploaded CSV')} · {active_run.get('row_count', 0):,} rows")
 if st.sidebar.button("Refresh project data", use_container_width=True):
     load_snapshot.clear(); load_metrics.clear(); load_history.clear(); st.rerun()
 
@@ -377,7 +409,7 @@ with tab_forecast:
     selected_product = st.selectbox("Choose a product", product_options, key="forecast_product")
     rec = next((r for r in candidates if r.get("product_id") == selected_product), None)
     if rec:
-        hist = load_history(selected_store, selected_product)
+        hist = load_history(selected_store, selected_product, current_sales_path)
         if hist:
             fc, stock, cover, gap = st.columns(4)
             fc.metric("7-day ML forecast", f"{float(rec.get('forecast_demand_7d', 0)):,.1f} units")
@@ -461,17 +493,91 @@ with tab_model:
     s3.markdown(f"**Held-out test**  \n{splits.get('test_period', '—')}")
     with st.expander("Features supplied to the model"):
         st.write(", ".join(metrics.get("features", [])))
-    st.markdown("#### Load new sales history")
-    uploaded = st.file_uploader("Upload a CSV to inspect its coverage", type=["csv"], help="Expected columns include Date, Store ID, Product ID, and Demand.")
+    st.markdown("#### Upload data and retrain")
+    st.caption("The uploaded CSV is kept as a separate run. Your original CSV and current model remain active unless every retraining stage succeeds.")
+    uploaded = st.file_uploader(
+        "Choose a sales-history CSV",
+        type=["csv"],
+        help="Use the same 16 columns and column order as the project's sales_data.csv.",
+        key="retraining_csv",
+    )
     if uploaded:
         try:
-            rows = list(csv.DictReader(uploaded.getvalue().decode("utf-8-sig").splitlines()))
-            required = {"Date", "Store ID", "Product ID", "Demand"}
-            if not rows or not required.issubset(rows[0]):
-                st.error("This CSV is missing required columns: Date, Store ID, Product ID, Demand.")
+            upload_bytes = uploaded.getvalue()
+            upload_text = upload_bytes.decode("utf-8-sig")
+            reader = csv.DictReader(upload_text.splitlines())
+            if reader.fieldnames != EXPECTED_COLUMNS:
+                missing = [name for name in EXPECTED_COLUMNS if name not in (reader.fieldnames or [])]
+                extra = [name for name in (reader.fieldnames or []) if name not in EXPECTED_COLUMNS]
+                st.error("CSV columns must exactly match the project's 16-column schema and order.")
+                if missing:
+                    st.caption("Missing: " + ", ".join(missing))
+                if extra:
+                    st.caption("Unexpected: " + ", ".join(extra))
             else:
-                st.success(f"Loaded {len(rows):,} rows for review · {len({r['Product ID'] for r in rows})} products · {min(r['Date'] for r in rows)} to {max(r['Date'] for r in rows)}.")
-                st.caption("This preview does not retrain or replace the saved Spark model. Run the project's feature engineering and training pipeline to publish an updated model and risk snapshot.")
+                rows = list(reader)
+                if not rows:
+                    st.error("This CSV has a header but no data rows.")
+                else:
+                    dates = [r.get("Date", "") for r in rows if r.get("Date")]
+                    products = {r.get("Product ID", "") for r in rows if r.get("Product ID")}
+                    stores_in_file = {r.get("Store ID", "") for r in rows if r.get("Store ID")}
+                    st.success(f"Ready: {len(rows):,} rows · {len(products)} products · {len(stores_in_file)} stores · {min(dates)} to {max(dates)}.")
+                    if len(set(dates)) < 90:
+                        st.warning("At least 90 distinct dates are required for training, validation, and test evaluation.")
+                    else:
+                        if st.button("Retrain model and update dashboard", type="primary", key="start_retraining"):
+                            upload_dir = os.path.join(BASE_DIR, "data", "processed", "uploads")
+                            os.makedirs(upload_dir, exist_ok=True)
+                            upload_path = os.path.join(upload_dir, f"upload_{uuid.uuid4().hex[:12]}.csv")
+                            with open(upload_path, "wb") as f:
+                                f.write(upload_bytes)
+
+                            command = [sys.executable, "-u", RETRAIN_SCRIPT, "--input-csv", upload_path]
+                            creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+                            log = ""
+                            try:
+                                with st.status("Retraining is running. This can take several minutes…", expanded=True) as status:
+                                    status.write("Preparing data, rebuilding features, training the model, and scoring stock risk.")
+                                    completed = subprocess.run(
+                                        command,
+                                        cwd=BASE_DIR,
+                                        capture_output=True,
+                                        text=True,
+                                        encoding="utf-8",
+                                        errors="replace",
+                                        timeout=7200,
+                                        creationflags=creation_flags,
+                                    )
+                                    log = (completed.stdout or "") + "\n" + (completed.stderr or "")
+                                    if completed.returncode != 0:
+                                        status.update(label="Retraining failed; the previous dashboard results are still active.", state="error")
+                                    else:
+                                        status.update(label="Retraining completed; dashboard results have been updated.", state="complete")
+                                if completed.returncode != 0:
+                                    st.error("The uploaded data was not activated because a pipeline step failed.")
+                                    with st.expander("Show retraining details"):
+                                        st.code("\n".join(log.splitlines()[-80:]))
+                                else:
+                                    load_snapshot.clear()
+                                    load_metrics.clear()
+                                    load_history.clear()
+                                    st.success("New model, scorecard, sales history, and risk snapshot are now active.")
+                                    st.rerun()
+                            except subprocess.TimeoutExpired as exc:
+                                st.error("Retraining exceeded the two-hour limit. The previous dashboard results remain active.")
+                                partial = exc.stdout or b""
+                                if isinstance(partial, bytes):
+                                    partial = partial.decode("utf-8", errors="replace")
+                                with st.expander("Show retraining details"):
+                                    st.code("\n".join(str(partial).splitlines()[-80:]))
+                            except OSError as exc:
+                                st.error(f"Could not start the retraining pipeline: {exc}")
+                            finally:
+                                try:
+                                    os.remove(upload_path)
+                                except OSError:
+                                    pass
         except (UnicodeDecodeError, csv.Error, KeyError) as exc:
             st.error(f"Could not read this CSV: {exc}")
 

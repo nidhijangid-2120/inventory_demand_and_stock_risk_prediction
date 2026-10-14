@@ -77,3 +77,5 @@ Interactive API documentation available at `http://localhost:8000/docs`.
 streamlit run src/dashboard/app.py
 ```
 View the dashboard at `http://localhost:8501`.
+
+To retrain from the dashboard, open **Model & data**, upload a CSV with the same 16 columns and order as `data/raw/sales_data.csv`, then click **Retrain model and update dashboard**. The upload needs at least 90 distinct dates and 36 dates per store/product series. Each run is stored separately; the dashboard switches to it only after ingestion, feature engineering, training, and risk scoring all succeed. The original CSV and last successful model/results are retained.
