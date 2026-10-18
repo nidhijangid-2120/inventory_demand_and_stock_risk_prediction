@@ -32,15 +32,15 @@ An end-to-end, production-oriented Data Engineering and Machine Learning platfor
 
 ## 📊 Model Performance & Baseline Benchmark
 
-Evaluated using chronological time-based splits (Train: 70% | Validation: 17% | Test: 14%):
+Evaluated using chronological 70% / 15% / 15% date cutoffs, with seven observations removed at each boundary so a seven-day target cannot cross into the next split:
 
 | Model / Approach | Horizon | Validation MAE | Validation RMSE | Validation WAPE | Test MAE | Test WAPE |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Naive Lag 1 Baseline** | 7 Days | 236.24 | 308.36 | 30.56% | - | - |
-| **Rolling 7-Day Average Baseline** | 7 Days | 132.40 | 171.71 | 17.13% | - | - |
-| **Spark MLlib Random Forest Model** | **7 Days** | **97.81** | **129.77** | **12.65%** | **103.07** | **14.46%** |
+| **Naive Lag 1 Baseline** | 7 Days | 239.41 | 311.62 | 29.63% | - | - |
+| **Rolling 7-Day Average Baseline** | 7 Days | 125.63 | 163.51 | 15.55% | - | - |
+| **Spark MLlib Random Forest Model** | **7 Days** | **90.91** | **121.15** | **11.25%** | **103.83** | **14.97%** |
 
-The machine learning model cuts forecasting error by more than **58%** compared to naive baselines.
+On this evaluation, the model reduces WAPE by about **62%** versus the naive baseline and **28%** versus the rolling-average baseline.
 
 ---
 
@@ -72,10 +72,13 @@ uvicorn src.api.main:app --reload --port 8000
 ```
 Interactive API documentation available at `http://localhost:8000/docs`.
 
+### Sales and stock operations
+The dashboard's **Sales & stock** tab records sales, supplier purchase orders, and received deliveries through FastAPI. The API persists them in a local SQLite operations database, seeds starting inventory and daily sales history from the active project snapshot and CSV, and recalculates seven-day demand and stock risk from the latest 28 recorded sales days (falling back to the saved ML forecast when no sales history exists). Endpoints are listed at `http://localhost:8000/docs`; the main operations routes are `GET /operations/risks`, `GET /operations/inventory`, `POST /operations/sales`, `POST /operations/orders`, and `POST /operations/receipts`. CSV uploads in **Model & data** run the complete Spark training pipeline through `POST /upload-sales`.
+
 ### 6. Launch Streamlit Operations Dashboard
 ```bash
 streamlit run src/dashboard/app.py
 ```
 View the dashboard at `http://localhost:8501`.
 
-To retrain from the dashboard, open **Model & data**, upload a CSV with the same 16 columns and order as `data/raw/sales_data.csv`, then click **Retrain model and update dashboard**. The upload needs at least 90 distinct dates and 36 dates per store/product series. Each run is stored separately; the dashboard switches to it only after ingestion, feature engineering, training, and risk scoring all succeed. The original CSV and last successful model/results are retained.
+To retrain from the dashboard, open **Model & data**, upload a CSV with the same 16 columns and order as `data/raw/sales_data.csv`, then click **Retrain model and update dashboard**. The upload needs at least 90 distinct dates and 36 consecutive daily records per store/product series, with no duplicate date/store/product rows. Each run is stored separately; the dashboard switches to it only after ingestion, feature engineering, training, and risk scoring all succeed. The original CSV and last successful model/results are retained.

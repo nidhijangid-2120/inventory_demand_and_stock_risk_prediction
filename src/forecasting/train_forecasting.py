@@ -64,11 +64,21 @@ def train_and_evaluate(
     train_end = observed_dates[train_index]
     val_end = observed_dates[val_index]
 
-    train_df = df.filter(F.col("date") <= train_end).cache()
-    val_df = df.filter((F.col("date") > train_end) & (F.col("date") <= val_end)).cache()
+    # A label at date t uses the next seven observations. Purge rows near
+    # each split boundary so those labels cannot include demand from the
+    # following evaluation period.
+    horizon = 7
+    train_label_end = observed_dates[max(0, train_index - horizon)]
+    val_label_end = observed_dates[max(train_index + 1, val_index - horizon)]
+
+    train_df = df.filter(F.col("date") <= train_label_end).cache()
+    val_df = df.filter((F.col("date") > train_end) & (F.col("date") <= val_label_end)).cache()
     test_df = df.filter(F.col("date") > val_end).cache()
 
-    print(f"Dataset split counts -> Train: {train_df.count()} | Val: {val_df.count()} | Test: {test_df.count()}")
+    split_counts = (train_df.count(), val_df.count(), test_df.count())
+    print(f"Dataset split counts -> Train: {split_counts[0]} | Val: {split_counts[1]} | Test: {split_counts[2]}")
+    if any(count == 0 for count in split_counts):
+        raise ValueError("Chronological splits are too small after removing rows whose 7-observation targets cross split boundaries.")
 
     target_col = "target_demand_next_7d"
 
@@ -149,8 +159,8 @@ def train_and_evaluate(
         "features": all_feature_cols,
         "target": target_col,
         "chronological_splits": {
-            "train_period": f"<= {train_end}",
-            "val_period": f"{train_end} to {val_end}",
+            "train_period": f"<= {train_label_end} (purged before {train_end})",
+            "val_period": f"{train_end} to {val_label_end} (purged before {val_end})",
             "test_period": f"> {val_end}"
         },
         "validation_comparison": {

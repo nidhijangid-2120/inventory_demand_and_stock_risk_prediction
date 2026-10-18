@@ -31,30 +31,30 @@
   ],
   "target": "target_demand_next_7d",
   "chronological_splits": {
-    "train_period": "<= 2023-06-15",
-    "val_period": "2023-06-15 to 2023-10-15",
-    "test_period": "> 2023-10-15"
+    "train_period": "<= 2023-06-12 (purged before 2023-06-19)",
+    "val_period": "2023-06-19 to 2023-09-29 (purged before 2023-10-06)",
+    "test_period": "> 2023-10-06"
   },
   "validation_comparison": {
     "Baseline_Naive_Lag1": {
-      "MAE": 236.24,
-      "RMSE": 308.36,
-      "WAPE": 30.56
+      "MAE": 239.41,
+      "RMSE": 311.62,
+      "WAPE": 29.63
     },
     "Baseline_Rolling_7d": {
-      "MAE": 132.4,
-      "RMSE": 171.71,
-      "WAPE": 17.13
+      "MAE": 125.63,
+      "RMSE": 163.51,
+      "WAPE": 15.55
     },
     "Random_Forest_ML": {
-      "MAE": 97.81,
-      "RMSE": 129.77,
-      "WAPE": 12.65
+      "MAE": 90.91,
+      "RMSE": 121.15,
+      "WAPE": 11.25
     }
   },
   "test_performance": {
-    "MAE": 103.07,
-    "RMSE": 134.36,
-    "WAPE": 14.46
+    "MAE": 103.83,
+    "RMSE": 134.7,
+    "WAPE": 14.97
   }
 }

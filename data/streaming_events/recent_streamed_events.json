@@ -48,5 +48,335 @@
     "units_sold": 6,
     "unit_price": 66.87,
     "source": "simulated_pos_register"
+  },
+  {
+    "event_id": "evt_f949428a44d74e5e8d2a3b1e3eae0ae2",
+    "event_timestamp": "2026-10-18T05:13:30.065228+00:00",
+    "store_id": "S002",
+    "product_id": "P0005",
+    "category": "Groceries",
+    "units_sold": 7,
+    "unit_price": 20.0,
+    "source": "simulated_pos_register"
+  },
+  {
+    "event_id": "evt_8ca16c892ec54bfd96af46b4b9b42c66",
+    "event_timestamp": "2026-10-18T05:13:30.065298+00:00",
+    "store_id": "S001",
+    "product_id": "P0010",
+    "category": "General",
+    "units_sold": 15,
+    "unit_price": 148.8,
+    "source": "simulated_pos_register"
+  },
+  {
+    "event_id": "evt_0be86af693ba48d29daf23fcd4e83330",
+    "event_timestamp": "2026-10-18T05:13:30.065323+00:00",
+    "store_id": "S005",
+    "product_id": "P0007",
+    "category": "General",
+    "units_sold": 11,
+    "unit_price": 84.41,
+    "source": "simulated_pos_register"
+  },
+  {
+    "event_id": "evt_ccb005d291bf44df91a416945fbd72bb",
+    "event_timestamp": "2026-10-18T05:13:30.065338+00:00",
+    "store_id": "S005",
+    "product_id": "P0008",
+    "category": "General",
+    "units_sold": 12,
+    "unit_price": 68.81,
+    "source": "simulated_pos_register"
+  },
+  {
+    "event_id": "evt_e692a68b161a455b877cccd0fa2ec33d",
+    "event_timestamp": "2026-10-18T05:13:30.065351+00:00",
+    "store_id": "S002",
+    "product_id": "P0002",
+    "category": "Clothing",
+    "units_sold": 12,
+    "unit_price": 56.97,
+    "source": "simulated_pos_register"
+  },
+  {
+    "event_id": "evt_e9b622ef6d354066880ce0e290499929",
+    "event_timestamp": "2026-10-18T05:13:30.065363+00:00",
+    "store_id": "S002",
+    "product_id": "P0001",
+    "category": "Electronics",
+    "units_sold": 12,
+    "unit_price": 57.38,
+    "source": "simulated_pos_register"
+  },
+  {
+    "event_id": "evt_c6fcdbcb4f84493fbeaf96357b15767b",
+    "event_timestamp": "2026-10-18T05:13:30.065374+00:00",
+    "store_id": "S002",
+    "product_id": "P0003",
+    "category": "Clothing",
+    "units_sold": 1,
+    "unit_price": 50.39,
+    "source": "simulated_pos_register"
+  },
+  {
+    "event_id": "evt_308b53c06d6a45cbb086d94e3b752a4d",
+    "event_timestamp": "2026-10-18T05:13:30.065385+00:00",
+    "store_id": "S003",
+    "product_id": "P0008",
+    "category": "General",
+    "units_sold": 15,
+    "unit_price": 48.01,
+    "source": "simulated_pos_register"
+  },
+  {
+    "event_id": "evt_4e5ce6aaf14b4c13b4e432fc1a79bd98",
+    "event_timestamp": "2026-10-18T05:13:30.065396+00:00",
+    "store_id": "S001",
+    "product_id": "P0009",
+    "category": "General",
+    "units_sold": 11,
+    "unit_price": 18.52,
+    "source": "simulated_pos_register"
+  },
+  {
+    "event_id": "evt_c63627a0b533496096e542ab2c2a53d8",
+    "event_timestamp": "2026-10-18T05:13:30.065406+00:00",
+    "store_id": "S002",
+    "product_id": "P0008",
+    "category": "General",
+    "units_sold": 15,
+    "unit_price": 108.14,
+    "source": "simulated_pos_register"
+  },
+  {
+    "event_id": "evt_2d479a62c24746799149283db828dc03",
+    "event_timestamp": "2026-10-18T05:13:32.273841+00:00",
+    "store_id": "S005",
+    "product_id": "P0012",
+    "category": "General",
+    "units_sold": 2,
+    "unit_price": 123.93,
+    "source": "simulated_pos_register"
+  },
+  {
+    "event_id": "evt_cde27a1dbacd459e8b7608f849f1ba89",
+    "event_timestamp": "2026-10-18T05:13:32.273894+00:00",
+    "store_id": "S004",
+    "product_id": "P0007",
+    "category": "General",
+    "units_sold": 5,
+    "unit_price": 80.22,
+    "source": "simulated_pos_register"
+  },
+  {
+    "event_id": "evt_9151df94583d47048d29d8ab9b394688",
+    "event_timestamp": "2026-10-18T05:13:32.273913+00:00",
+    "store_id": "S004",
+    "product_id": "P0009",
+    "category": "General",
+    "units_sold": 3,
+    "unit_price": 110.53,
+    "source": "simulated_pos_register"
+  },
+  {
+    "event_id": "evt_a0f22446cef2415d95c5e3ab7ddc0ee1",
+    "event_timestamp": "2026-10-18T05:13:32.273927+00:00",
+    "store_id": "S004",
+    "product_id": "P0018",
+    "category": "General",
+    "units_sold": 12,
+    "unit_price": 97.46,
+    "source": "simulated_pos_register"
+  },
+  {
+    "event_id": "evt_f237086f2b6349cdbe0bbaddc0d3a8e6",
+    "event_timestamp": "2026-10-18T05:13:32.273939+00:00",
+    "store_id": "S005",
+    "product_id": "P0014",
+    "category": "General",
+    "units_sold": 13,
+    "unit_price": 82.15,
+    "source": "simulated_pos_register"
+  },
+  {
+    "event_id": "evt_d2290215482040fc9f87548f9dd0f031",
+    "event_timestamp": "2026-10-18T05:13:32.273951+00:00",
+    "store_id": "S003",
+    "product_id": "P0003",
+    "category": "Clothing",
+    "units_sold": 10,
+    "unit_price": 115.81,
+    "source": "simulated_pos_register"
+  },
+  {
+    "event_id": "evt_7d58625567f24bb7b7a0f3e1398686fb",
+    "event_timestamp": "2026-10-18T05:13:32.273964+00:00",
+    "store_id": "S005",
+    "product_id": "P0020",
+    "category": "General",
+    "units_sold": 14,
+    "unit_price": 128.08,
+    "source": "simulated_pos_register"
+  },
+  {
+    "event_id": "evt_a525a7b266b6456594fd8e5078b8be1a",
+    "event_timestamp": "2026-10-18T05:13:32.273976+00:00",
+    "store_id": "S005",
+    "product_id": "P0009",
+    "category": "General",
+    "units_sold": 3,
+    "unit_price": 23.84,
+    "source": "simulated_pos_register"
+  },
+  {
+    "event_id": "evt_63ef9b73109e4684964a4624ab7e75aa",
+    "event_timestamp": "2026-10-18T05:13:32.273988+00:00",
+    "store_id": "S003",
+    "product_id": "P0004",
+    "category": "Electronics",
+    "units_sold": 7,
+    "unit_price": 105.99,
+    "source": "simulated_pos_register"
+  },
+  {
+    "event_id": "evt_bf031fb0180346a792902d69599d6a57",
+    "event_timestamp": "2026-10-18T05:13:32.273999+00:00",
+    "store_id": "S002",
+    "product_id": "P0001",
+    "category": "Electronics",
+    "units_sold": 12,
+    "unit_price": 83.81,
+    "source": "simulated_pos_register"
+  },
+  {
+    "event_id": "evt_9bddb82446a64d4b8c31032a6dd94bb6",
+    "event_timestamp": "2026-10-18T05:13:34.695831+00:00",
+    "store_id": "S002",
+    "product_id": "P0019",
+    "category": "General",
+    "units_sold": 11,
+    "unit_price": 25.57,
+    "source": "simulated_pos_register"
+  },
+  {
+    "event_id": "evt_548611bab75e4884804d8ecb4c6a6510",
+    "event_timestamp": "2026-10-18T05:13:34.695889+00:00",
+    "store_id": "S001",
+    "product_id": "P0001",
+    "category": "Electronics",
+    "units_sold": 8,
+    "unit_price": 23.16,
+    "source": "simulated_pos_register"
+  },
+  {
+    "event_id": "evt_afe1d390fc4546008d42c7e9fe7626ba",
+    "event_timestamp": "2026-10-18T05:13:34.695901+00:00",
+    "store_id": "S002",
+    "product_id": "P0007",
+    "category": "General",
+    "units_sold": 10,
+    "unit_price": 44.69,
+    "source": "simulated_pos_register"
+  },
+  {
+    "event_id": "evt_c91a16a491b849f28a089173c62d0d06",
+    "event_timestamp": "2026-10-18T05:13:34.695910+00:00",
+    "store_id": "S003",
+    "product_id": "P0019",
+    "category": "General",
+    "units_sold": 7,
+    "unit_price": 65.38,
+    "source": "simulated_pos_register"
+  },
+  {
+    "event_id": "evt_bf7485db22e04d738d36871a467ff964",
+    "event_timestamp": "2026-10-18T05:13:34.695920+00:00",
+    "store_id": "S005",
+    "product_id": "P0009",
+    "category": "General",
+    "units_sold": 5,
+    "unit_price": 57.94,
+    "source": "simulated_pos_register"
+  },
+  {
+    "event_id": "evt_69e1c9677f284f668436de4e53d93598",
+    "event_timestamp": "2026-10-18T05:13:34.695927+00:00",
+    "store_id": "S002",
+    "product_id": "P0019",
+    "category": "General",
+    "units_sold": 6,
+    "unit_price": 86.73,
+    "source": "simulated_pos_register"
+  },
+  {
+    "event_id": "evt_31885289ae2640c9930b2adb05245b2f",
+    "event_timestamp": "2026-10-18T05:13:34.696052+00:00",
+    "store_id": "S001",
+    "product_id": "P0013",
+    "category": "General",
+    "units_sold": 4,
+    "unit_price": 149.47,
+    "source": "simulated_pos_register"
+  },
+  {
+    "event_id": "evt_98c32629e97c486387cd6ebb6b718fdc",
+    "event_timestamp": "2026-10-18T05:13:34.696069+00:00",
+    "store_id": "S003",
+    "product_id": "P0006",
+    "category": "Toys",
+    "units_sold": 12,
+    "unit_price": 47.91,
+    "source": "simulated_pos_register"
+  },
+  {
+    "event_id": "evt_77a5f7706bed466caf7b7cf20c1632b1",
+    "event_timestamp": "2026-10-18T05:13:34.696078+00:00",
+    "store_id": "S001",
+    "product_id": "P0020",
+    "category": "General",
+    "units_sold": 14,
+    "unit_price": 72.85,
+    "source": "simulated_pos_register"
+  },
+  {
+    "event_id": "evt_63659d51d50e46e5a333bdab2233bbb7",
+    "event_timestamp": "2026-10-18T05:13:34.696087+00:00",
+    "store_id": "S002",
+    "product_id": "P0011",
+    "category": "General",
+    "units_sold": 13,
+    "unit_price": 75.88,
+    "source": "simulated_pos_register"
+  },
+  {
+    "event_id": "evt_5dd52345d4224c1fbfb6cea3b2e1146f",
+    "event_timestamp": "2026-10-18T05:13:41.897039+00:00",
+    "store_id": "S001",
+    "product_id": "P0001",
+    "category": "General",
+    "units_sold": 1,
+    "unit_price": 0,
+    "source": "dashboard"
+  },
+  {
+    "event_id": "evt_01f3f14c36574708b82bf6f04a752745",
+    "event_timestamp": "2026-10-18T05:13:44.576886+00:00",
+    "store_id": "S001",
+    "product_id": "P0001",
+    "category": "General",
+    "units_sold": 1,
+    "unit_price": 0,
+    "source": "dashboard"
+  },
+  {
+    "event_id": "evt_d284b269d37b4f51b9532c6c9b885068",
+    "event_timestamp": "2026-10-18T12:52:41.790214+00:00",
+    "store_id": "S001",
+    "product_id": "P0001",
+    "category": "General",
+    "units_sold": 1,
+    "unit_price": 0,
+    "source": "dashboard"
   }
 ]

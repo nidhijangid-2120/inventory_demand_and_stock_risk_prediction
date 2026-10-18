@@ -9,9 +9,14 @@ Exposes prediction, stock-risk evaluation, and model metadata endpoints:
 
 import os
 import json
+import asyncio
+import uuid
+from datetime import date
+from pathlib import Path
 from typing import Optional, List
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from pydantic import BaseModel, Field
+from src.operations import store as operations_store
 
 app = FastAPI(
     title="AI Inventory Demand & Stock Risk Prediction Service",
@@ -36,7 +41,7 @@ class PredictionRequest(BaseModel):
     category: Optional[str] = Field("Electronics", example="Electronics")
     inventory_level: int = Field(..., ge=0, example=80)
     units_ordered: int = Field(0, ge=0, example=20)
-    forecast_horizon_days: int = Field(7, example=7)
+    forecast_horizon_days: int = Field(7, ge=1, example=7)
     recent_daily_demand_avg: float = Field(..., gt=0, example=17.5)
 
 class PredictionResponse(BaseModel):
@@ -53,6 +58,50 @@ class PredictionResponse(BaseModel):
     overstock_risk: str
     status_action: str
     recommendation: str
+
+class SalesEntry(BaseModel):
+    store_id: str
+    product_id: str
+    units_sold: int = Field(..., ge=1)
+    sale_date: date = Field(default_factory=date.today)
+
+class PurchaseEntry(BaseModel):
+    store_id: str
+    product_id: str
+    units: int = Field(..., ge=1)
+
+class StockUpdate(BaseModel):
+    store_id: str
+    product_id: str
+    category: str = "General"
+    current_stock: int = Field(..., ge=0)
+
+@app.post("/upload-sales")
+async def upload_sales_csv(request: Request, filename: str = Query("sales_upload.csv")):
+    """Accept a CSV body, run the full retraining pipeline, and activate it on success."""
+    content = await request.body()
+    if not content:
+        raise HTTPException(status_code=400, detail="Upload a non-empty CSV file.")
+    upload_dir = os.path.join(BASE_DIR, "data", "processed", "api_uploads")
+    os.makedirs(upload_dir, exist_ok=True)
+    safe_name = os.path.basename(filename)
+    upload_path = Path(upload_dir) / f"{uuid.uuid4().hex[:12]}_{safe_name}"
+    upload_path.write_bytes(content)
+    try:
+        from src.processing.retrain_pipeline import run
+        metadata = await asyncio.to_thread(run, upload_path)
+        await asyncio.to_thread(
+            operations_store.refresh_from_sources,
+            os.path.join(BASE_DIR, metadata["snapshot_path"].replace("/", os.sep)),
+            os.path.join(BASE_DIR, metadata["sales_path"].replace("/", os.sep)),
+        )
+        return {"activated": True, "run": metadata}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Retraining failed; the previous run remains active. {exc}") from exc
+    finally:
+        upload_path.unlink(missing_ok=True)
 
 @app.get("/health")
 def health():
@@ -98,6 +147,49 @@ def get_inventory_risks(
         "snapshot_date": snapshot[0].get("snapshot_date") if snapshot else None,
         "results": filtered[:limit]
     }
+
+@app.get("/operations/inventory")
+def get_operations_inventory():
+    return {"results": operations_store.inventory_rows()}
+
+@app.post("/operations/sales")
+def record_operations_sale(entry: SalesEntry):
+    try:
+        updated = operations_store.record_sale(entry.store_id, entry.product_id, entry.units_sold, entry.sale_date)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"recorded": True, "inventory": updated}
+
+@app.post("/operations/orders")
+def record_purchase_order(entry: PurchaseEntry):
+    try:
+        return {"recorded": True, "inventory": operations_store.place_order(entry.store_id, entry.product_id, entry.units)}
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+@app.post("/operations/receipts")
+def receive_purchase_order(entry: PurchaseEntry):
+    try:
+        return {"recorded": True, "inventory": operations_store.receive_order(entry.store_id, entry.product_id, entry.units)}
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+@app.post("/operations/stock")
+def set_current_stock(entry: StockUpdate):
+    return {"recorded": True, "inventory": operations_store.update_stock(entry.store_id, entry.product_id, entry.category, entry.current_stock)}
+
+@app.get("/operations/risks")
+def get_operations_risks(store_id: Optional[str] = None, category: Optional[str] = None, stockout_risk: Optional[str] = None):
+    results = operations_store.risk_rows()
+    if store_id:
+        results = [r for r in results if r.get("store_id") == store_id]
+    if category:
+        results = [r for r in results if r.get("category", "").lower() == category.lower()]
+    if stockout_risk:
+        results = [r for r in results if r.get("stockout_risk") == stockout_risk]
+    return {"count": len(results), "results": results}
 
 @app.post("/predict-demand-risk", response_model=PredictionResponse)
 def predict_demand_and_risk(req: PredictionRequest):

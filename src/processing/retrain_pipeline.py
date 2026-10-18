@@ -44,6 +44,7 @@ def validate_dataset(path: Path) -> tuple[int, int, str, str]:
     dates: set[str] = set()
     pair_counts: Counter[tuple[str, str]] = Counter()
     pair_dates: dict[tuple[str, str], set[str]] = defaultdict(set)
+    seen_records: set[tuple[str, str, str]] = set()
     try:
         source = path.open("r", encoding="utf-8-sig", newline="")
     except OSError as exc:
@@ -85,6 +86,13 @@ def validate_dataset(path: Path) -> tuple[int, int, str, str]:
             row_count += 1
             dates.add(date_value.isoformat())
             pair = (row["Store ID"].strip(), row["Product ID"].strip())
+            record_key = (date_value.isoformat(), *pair)
+            if record_key in seen_records:
+                raise ValueError(
+                    f"CSV row {line_number} duplicates the date/store/product record "
+                    f"{record_key[0]} / {pair[0]} / {pair[1]}."
+                )
+            seen_records.add(record_key)
             pair_counts[pair] += 1
             pair_dates[pair].add(date_value.isoformat())
 
@@ -96,6 +104,21 @@ def validate_dataset(path: Path) -> tuple[int, int, str, str]:
     if short_pairs:
         sample = ", ".join(f"{store}/{product} ({len(pair_dates[(store, product)])} dates)" for store, product in short_pairs[:5])
         raise ValueError("Each store/product series needs at least 36 rows for 28-day history features. Short examples: " + sample)
+
+    gaps = []
+    for (store, product), values in pair_dates.items():
+        ordered = sorted(dt.date.fromisoformat(value) for value in values)
+        for previous, current in zip(ordered, ordered[1:]):
+            if (current - previous).days != 1:
+                gaps.append(f"{store}/{product} ({previous} to {current})")
+                break
+        if len(gaps) >= 5:
+            break
+    if gaps:
+        raise ValueError(
+            "Each store/product series must have one record per calendar day for the "
+            "7-day windows to mean 7 days. Date gaps found: " + ", ".join(gaps)
+        )
 
     return row_count, len(dates), min(dates), max(dates)
 

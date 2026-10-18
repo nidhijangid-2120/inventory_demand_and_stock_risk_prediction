@@ -12,9 +12,9 @@ import datetime as dt
 import html
 import json
 import os
-import subprocess
-import sys
-import uuid
+import urllib.error
+import urllib.parse
+import urllib.request
 from collections import defaultdict
 
 import streamlit as st
@@ -117,13 +117,36 @@ SNAPSHOT_PATH = os.path.join(BASE_DIR, "data", "gold", "latest_risk_snapshot.jso
 METRICS_PATH = os.path.join(BASE_DIR, "models", "model_metrics.json")
 SALES_PATH = os.path.join(BASE_DIR, "data", "raw", "sales_data.csv")
 ACTIVE_RUN_PATH = os.path.join(BASE_DIR, "data", "processed", "active_retraining_run.json")
-RETRAIN_SCRIPT = os.path.join(BASE_DIR, "src", "processing", "retrain_pipeline.py")
 EXPECTED_COLUMNS = [
     "Date", "Store ID", "Product ID", "Category", "Region",
     "Inventory Level", "Units Sold", "Units Ordered", "Price", "Discount",
     "Weather Condition", "Promotion", "Competitor Pricing", "Seasonality",
     "Epidemic", "Demand",
 ]
+API_BASE = os.environ.get("INVENTORY_API_URL", "http://127.0.0.1:8000")
+
+
+def api_json(path: str, payload=None):
+    body = json.dumps(payload).encode("utf-8") if payload is not None else None
+    request = urllib.request.Request(
+        API_BASE + path,
+        data=body,
+        headers={"Content-Type": "application/json"} if body is not None else {},
+        method="POST" if body is not None else "GET",
+    )
+    with urllib.request.urlopen(request, timeout=10) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def api_upload_csv(filename: str, content: bytes):
+    request = urllib.request.Request(
+        API_BASE + "/upload-sales?filename=" + urllib.parse.quote(filename),
+        data=content,
+        headers={"Content-Type": "text/csv"},
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=7200) as response:
+        return json.loads(response.read().decode("utf-8"))
 
 
 def active_run_config():
@@ -312,6 +335,12 @@ current_sales_path = active_path(active_run, "sales_path", SALES_PATH)
 try:
     snapshot = load_snapshot(current_snapshot_path)
     metrics = load_metrics(current_metrics_path)
+    try:
+        operational_results = api_json("/operations/risks").get("results", [])
+        if operational_results:
+            snapshot = operational_results
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError):
+        pass
 except (OSError, json.JSONDecodeError) as exc:
     st.error(f"The dashboard could not load its project data: {exc}")
     st.info("Confirm that the project contains data/gold/latest_risk_snapshot.json and models/model_metrics.json.")
@@ -336,7 +365,7 @@ st.sidebar.markdown(f"**Forecast horizon**  \n7 days · Spark MLlib Random Fores
 st.sidebar.caption(f"Risk snapshot: {snapshot_date}")
 if active_run:
     st.sidebar.caption(f"Active upload: {active_run.get('dataset_name', 'uploaded CSV')} · {active_run.get('row_count', 0):,} rows")
-if st.sidebar.button("Refresh project data", use_container_width=True):
+if st.sidebar.button("Refresh dashboard", use_container_width=True):
     load_snapshot.clear(); load_metrics.clear(); load_history.clear(); st.rerun()
 
 filtered = [r for r in snapshot
@@ -358,9 +387,68 @@ k3.metric("Watch list", f"{len(elevated):,}", "Below safety buffer", delta_color
 k4.metric("7-day demand", f"{forecast_total:,.0f}", "units across selected SKUs")
 k5.metric("Uncovered demand", f"{shortfall:,.0f}", "units to replenish", delta_color="inverse")
 
-tab_overview, tab_risk, tab_forecast, tab_actions, tab_model = st.tabs([
-    "Overview", "Stock risk", "Forecast explorer", "Replenishment planner", "Model & data"
+tab_operations, tab_overview, tab_risk, tab_forecast, tab_actions, tab_model = st.tabs([
+    "Sales & stock", "Overview", "Stock risk", "Forecast explorer", "Replenishment planner", "Model & data"
 ])
+
+with tab_operations:
+    st.subheader("Record sales, stock, and supplier orders")
+    st.caption("These entries are saved in the project's local operations database. Sales reduce on-hand stock; purchase orders count as incoming stock; receiving an order moves it into on-hand stock.")
+    operation_left, operation_right = st.columns([1, 1.4])
+    store_options = stores or ["S001"]
+    product_options = sorted({r.get("product_id") for r in snapshot if r.get("product_id")}) or ["P0001"]
+    with operation_left:
+        with st.form("record_sale"):
+            sale_store = st.selectbox("Sale · store", store_options, key="ops_sale_store")
+            sale_product = st.selectbox("Sale · product", product_options, key="ops_sale_product")
+            sale_units = st.number_input("Units sold", min_value=1, value=1, step=1, key="ops_sale_units")
+            if st.form_submit_button("Save sale"):
+                try:
+                    api_json("/operations/sales", {"store_id": sale_store, "product_id": sale_product, "units_sold": int(sale_units)})
+                    st.success("Sale saved; stock and demand history updated.")
+                    st.rerun()
+                except urllib.error.HTTPError as exc:
+                    st.error(exc.read().decode("utf-8", errors="replace"))
+                except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+                    st.error(f"Could not reach FastAPI at {API_BASE}. ({exc})")
+        with st.form("record_purchase_order"):
+            order_store = st.selectbox("Supplier order · store", store_options, key="ops_order_store")
+            order_product = st.selectbox("Supplier order · product", product_options, key="ops_order_product")
+            order_units = st.number_input("Units ordered", min_value=1, value=10, step=1, key="ops_order_units")
+            if st.form_submit_button("Save incoming order"):
+                try:
+                    api_json("/operations/orders", {"store_id": order_store, "product_id": order_product, "units": int(order_units)})
+                    st.success("Incoming order saved; risk calculation now includes it.")
+                    st.rerun()
+                except urllib.error.HTTPError as exc:
+                    st.error(exc.read().decode("utf-8", errors="replace"))
+                except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+                    st.error(f"Could not reach FastAPI at {API_BASE}. ({exc})")
+        with st.form("receive_purchase_order"):
+            receipt_store = st.selectbox("Receive order · store", store_options, key="ops_receipt_store")
+            receipt_product = st.selectbox("Receive order · product", product_options, key="ops_receipt_product")
+            receipt_units = st.number_input("Units received", min_value=1, value=1, step=1, key="ops_receipt_units")
+            if st.form_submit_button("Confirm delivery"):
+                try:
+                    api_json("/operations/receipts", {"store_id": receipt_store, "product_id": receipt_product, "units": int(receipt_units)})
+                    st.success("Delivery recorded; units moved from incoming to on-hand stock.")
+                    st.rerun()
+                except urllib.error.HTTPError as exc:
+                    st.error(exc.read().decode("utf-8", errors="replace"))
+                except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+                    st.error(f"Could not reach FastAPI at {API_BASE}. ({exc})")
+    with operation_right:
+        st.markdown("#### Current forecast and stock risk")
+        try:
+            live_risk = api_json("/operations/risks").get("results", [])
+            if live_risk:
+                live_risk = sorted(live_risk, key=lambda r: (0 if r.get("stockout_risk") == "HIGH_STOCKOUT_RISK" else 1 if r.get("stockout_risk") == "ELEVATED_STOCKOUT_RISK" else 2, float(r.get("inventory_gap", 0))))
+                render_table(live_risk, 20)
+                st.caption("Forecast uses each item's recent 28-day sales rate; if none is available, it uses the saved ML forecast. New sales/orders change this table immediately after refresh.")
+            else:
+                st.info("No inventory snapshot is available yet. Run the batch pipeline first.")
+        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+            st.warning(f"FastAPI is not available at {API_BASE}. Start it in another CMD window. ({exc})")
 
 with tab_overview:
     left, right = st.columns([1.35, 1])
@@ -527,57 +615,21 @@ with tab_model:
                         st.warning("At least 90 distinct dates are required for training, validation, and test evaluation.")
                     else:
                         if st.button("Retrain model and update dashboard", type="primary", key="start_retraining"):
-                            upload_dir = os.path.join(BASE_DIR, "data", "processed", "uploads")
-                            os.makedirs(upload_dir, exist_ok=True)
-                            upload_path = os.path.join(upload_dir, f"upload_{uuid.uuid4().hex[:12]}.csv")
-                            with open(upload_path, "wb") as f:
-                                f.write(upload_bytes)
-
-                            command = [sys.executable, "-u", RETRAIN_SCRIPT, "--input-csv", upload_path]
-                            creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-                            log = ""
                             try:
                                 with st.status("Retraining is running. This can take several minutes…", expanded=True) as status:
-                                    status.write("Preparing data, rebuilding features, training the model, and scoring stock risk.")
-                                    completed = subprocess.run(
-                                        command,
-                                        cwd=BASE_DIR,
-                                        capture_output=True,
-                                        text=True,
-                                        encoding="utf-8",
-                                        errors="replace",
-                                        timeout=7200,
-                                        creationflags=creation_flags,
-                                    )
-                                    log = (completed.stdout or "") + "\n" + (completed.stderr or "")
-                                    if completed.returncode != 0:
-                                        status.update(label="Retraining failed; the previous dashboard results are still active.", state="error")
-                                    else:
-                                        status.update(label="Retraining completed; dashboard results have been updated.", state="complete")
-                                if completed.returncode != 0:
-                                    st.error("The uploaded data was not activated because a pipeline step failed.")
-                                    with st.expander("Show retraining details"):
-                                        st.code("\n".join(log.splitlines()[-80:]))
-                                else:
-                                    load_snapshot.clear()
-                                    load_metrics.clear()
-                                    load_history.clear()
-                                    st.success("New model, scorecard, sales history, and risk snapshot are now active.")
-                                    st.rerun()
-                            except subprocess.TimeoutExpired as exc:
-                                st.error("Retraining exceeded the two-hour limit. The previous dashboard results remain active.")
-                                partial = exc.stdout or b""
-                                if isinstance(partial, bytes):
-                                    partial = partial.decode("utf-8", errors="replace")
-                                with st.expander("Show retraining details"):
-                                    st.code("\n".join(str(partial).splitlines()[-80:]))
-                            except OSError as exc:
-                                st.error(f"Could not start the retraining pipeline: {exc}")
-                            finally:
-                                try:
-                                    os.remove(upload_path)
-                                except OSError:
-                                    pass
+                                    status.write("Sending the CSV to FastAPI to rebuild features, train the model, and score inventory risk.")
+                                    result = api_upload_csv(uploaded.name, upload_bytes)
+                                    status.update(label="Retraining completed; dashboard results have been updated.", state="complete")
+                                load_snapshot.clear()
+                                load_metrics.clear()
+                                load_history.clear()
+                                st.success(f"New model and dashboard data are active for {result['run']['dataset_name']}.")
+                                st.rerun()
+                            except urllib.error.HTTPError as exc:
+                                detail = exc.read().decode("utf-8", errors="replace")
+                                st.error(f"FastAPI could not activate this CSV: {detail}")
+                            except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+                                st.error(f"Could not reach FastAPI at {API_BASE}. Start the API and retry. ({exc})")
         except (UnicodeDecodeError, csv.Error, KeyError) as exc:
             st.error(f"Could not read this CSV: {exc}")
 
